@@ -14,6 +14,10 @@
 중요한 한계 (docs/표정감정_설계.md 참고)
 - 파킨슨 환자의 가면양 얼굴(hypomimia), 일본 문화권의 표정 표현 억제(display rule) 등
   이유로 실제 정서 상태와 무관하게 표정 변화 자체가 거의 없을 수 있다.
+- 실측 결과 FER2013 기반 사전학습 모델은 조명이 어둡거나 웹캠 화질이 낮을 때 정확도가
+  크게 떨어짐(예: 웃는 얼굴인데도 sad/neutral이 우세하게 나오는 오분류 확인됨, 2026-09-22).
+  -> 이 모델은 현재 그대로 채택하기 어렵다고 판단, 프레임 밝기를 함께 로깅해서
+     조명 문제와 모델 자체 한계를 구분할 수 있게 함.
 - 그래서 이 스크립트는 "표정 변화가 낮음" 자체를 저활성 표정(flat affect) 플래그로 별도
   탐지하고, 이 플래그가 뜨면 표정 결과만으로 판단하지 말고 챗봇 S 데이터·생체신호 O 데이터와
   반드시 교차검증하라는 신호를 이벤트에 함께 실어 보낸다.
@@ -24,6 +28,11 @@
 사용법:
     python emotion_trend_tracker.py            # 웹캠
     python emotion_trend_tracker.py video.mp4  # 영상 파일
+
+저장 위치
+    실행할 때마다 runs/ 폴더 아래에 새 파일로 저장됨(덮어쓰거나 섞이지 않음):
+      runs/emotion_run_<타임스탬프>.jsonl      # 매 프레임/트렌드 이벤트 원본 로그
+      runs/emotion_run_<타임스탬프>_summary.json  # 종료 시 세션 요약(평균 밝기 포함)
 """
 
 import sys
@@ -34,15 +43,24 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
-from fer import FER
+import numpy as np
+from fer.fer import FER  # fer 25.x부터 __init__.py가 FER을 재export하지 않음
 
 
 # ---------------------------------------------------------------------------
 # 설정
 # ---------------------------------------------------------------------------
 SAMPLE_INTERVAL_SEC = 2.0          # 매 프레임 분석은 과부하 -> 이 간격으로 샘플링
-LOG_PATH = Path("emotion_events.jsonl")
 TREND_WINDOW_SEC = 60 * 60          # 최근 1시간 기준 추이 계산 (데모 시 짧게 조정 가능)
+
+RUNS_DIR = Path("runs")
+RUNS_DIR.mkdir(exist_ok=True)
+RUN_ID = time.strftime("%Y%m%d_%H%M%S")
+LOG_PATH = RUNS_DIR / f"emotion_run_{RUN_ID}.jsonl"
+SUMMARY_PATH = RUNS_DIR / f"emotion_run_{RUN_ID}_summary.json"
+
+# 밝기 참고 기준 (0~255, 그레이스케일 평균). 이 값보다 낮으면 "조명 어두움"으로 표시.
+DARK_FRAME_BRIGHTNESS_THRESHOLD = 80
 
 # FER 7종 원시 신호 -> 임상 타깃 4종 프록시 매핑 (docs/표정감정_설계.md 표 참고)
 PAIN_PROXY_EMOTIONS = {"angry", "disgust"}        # 미간 찌푸림 등 AU 유사성 근거
@@ -55,17 +73,27 @@ FLAT_AFFECT_MAX_SCORE_THRESHOLD = 0.35   # 이 값보다 top emotion 확률이 �
 FLAT_AFFECT_RATIO_THRESHOLD = 0.7         # 윈도우 내 이런 프레임이 이 비율 이상이면 플래그 발생
 
 
+def frame_brightness(frame) -> float:
+    """프레임의 평균 밝기(0~255, 그레이스케일 기준). 조명 문제 정량화용."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    return float(np.mean(gray))
+
+
 @dataclass
 class EmotionMonitor:
     history: deque = field(default_factory=deque)  # (timestamp, emotion_scores dict)
+    brightness_history: deque = field(default_factory=deque)  # (timestamp, brightness)
 
-    def add(self, timestamp: float, scores: dict) -> None:
+    def add(self, timestamp: float, scores: dict, brightness: float) -> None:
         self.history.append((timestamp, scores))
+        self.brightness_history.append((timestamp, brightness))
         self._trim(timestamp)
 
     def _trim(self, now_ts: float) -> None:
         while self.history and now_ts - self.history[0][0] > TREND_WINDOW_SEC:
             self.history.popleft()
+        while self.brightness_history and now_ts - self.brightness_history[0][0] > TREND_WINDOW_SEC:
+            self.brightness_history.popleft()
 
     @staticmethod
     def proxy_scores(scores: dict) -> dict:
@@ -96,6 +124,10 @@ class EmotionMonitor:
 
         flat_ratio = flat_count / n
         flat_affect_flag = flat_ratio >= FLAT_AFFECT_RATIO_THRESHOLD
+        avg_brightness = (
+            sum(b for _, b in self.brightness_history) / len(self.brightness_history)
+            if self.brightness_history else 0.0
+        )
 
         result = {
             "window_sec": TREND_WINDOW_SEC,
@@ -104,6 +136,8 @@ class EmotionMonitor:
             "avg_proxy_ratio": avg_proxy,
             "flat_affect_ratio": round(flat_ratio, 3),
             "flat_affect_flag": flat_affect_flag,
+            "avg_brightness": round(avg_brightness, 1),
+            "low_light_condition": avg_brightness < DARK_FRAME_BRIGHTNESS_THRESHOLD,
         }
         if flat_affect_flag:
             # 파킨슨(가면양 얼굴) / 일본 문화권(표현 억제) 등으로 표정 자체가 약할 수 있음.
@@ -112,10 +146,15 @@ class EmotionMonitor:
                 "표정 변화가 지속적으로 낮게 관찰됨 - 표정 결과만으로 정서 상태를 단정하지 말고 "
                 "챗봇 대화(S) 및 생체신호(O) 데이터와 함께 교차검증 필요"
             )
+        if result["low_light_condition"]:
+            result["caution_lighting"] = (
+                "평균 프레임 밝기가 낮음 - 조명 부족으로 인한 오분류 가능성이 있으니 "
+                "결과 해석 시 조명 상태를 함께 고려할 것"
+            )
         return result
 
 
-def emit_event(module: str, event_type: str, evidence: dict) -> None:
+def emit_event(module: str, event_type: str, evidence: dict) -> dict:
     """실제로는 FastAPI로 POST. 프로토타입에서는 표준 이벤트 스키마로 JSONL 저장 + 콘솔 출력."""
     event = {
         "patient_id": "demo-patient-01",
@@ -127,6 +166,26 @@ def emit_event(module: str, event_type: str, evidence: dict) -> None:
     print(json.dumps(event, ensure_ascii=False))
     with LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    return event
+
+
+def write_summary(monitor: "EmotionMonitor", run_started_at: float, source) -> None:
+    """세션 종료 시 요약본 저장. runs/ 아래 이번 실행 전용 파일로 남는다."""
+    final_trend = monitor.trend_ratio()
+    summary = {
+        "run_id": RUN_ID,
+        "source": str(source),
+        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(run_started_at)),
+        "ended_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "duration_sec": round(time.time() - run_started_at, 1),
+        "total_samples": len(monitor.history),
+        "final_trend": final_trend,
+        "log_file": str(LOG_PATH),
+    }
+    with SUMMARY_PATH.open("w", encoding="utf-8") as f:
+        json.dump(summary, f, ensure_ascii=False, indent=2)
+    print(f"\n[요약 저장 완료] {SUMMARY_PATH}")
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
 
 
 def main():
@@ -137,49 +196,56 @@ def main():
     monitor = EmotionMonitor()
 
     last_sample_time = 0.0
+    run_started_at = time.time()
+    print(f"[실행 시작] 로그: {LOG_PATH}")
 
-    while cap.isOpened():
-        ok, frame = cap.read()
-        if not ok:
-            break
+    try:
+        while cap.isOpened():
+            ok, frame = cap.read()
+            if not ok:
+                break
 
-        now = time.time()
-        if now - last_sample_time < SAMPLE_INTERVAL_SEC:
+            now = time.time()
+            if now - last_sample_time < SAMPLE_INTERVAL_SEC:
+                cv2.imshow("emotion-trend-tracker (q to quit)", frame)
+                if cv2.waitKey(1) & 0xFF == ord("q"):
+                    break
+                continue
+            last_sample_time = now
+
+            brightness = frame_brightness(frame)
+            results = detector.detect_emotions(frame)
+            if results:
+                # 침상 카메라는 환자 1인 기준이므로 첫 번째 검출 결과만 사용
+                scores = results[0]["emotions"]  # 예: {"angry":0.01,"happy":0.7,...}
+                monitor.add(now, scores, brightness)
+
+                top_emotion = max(scores, key=scores.get)
+                proxy = EmotionMonitor.proxy_scores(scores)
+                emit_event(
+                    "facial",
+                    "emotion_classified",
+                    {
+                        "top_emotion": top_emotion,
+                        "raw_scores": {k: round(v, 3) for k, v in scores.items()},
+                        "proxy_scores": proxy,
+                        "low_expressivity": max(scores.values(), default=0.0) < FLAT_AFFECT_MAX_SCORE_THRESHOLD,
+                        "frame_brightness": round(brightness, 1),
+                        "low_light_frame": brightness < DARK_FRAME_BRIGHTNESS_THRESHOLD,
+                    },
+                )
+
+                trend = monitor.trend_ratio()
+                if trend:
+                    emit_event("facial", "emotion_trend_update", trend)
+
             cv2.imshow("emotion-trend-tracker (q to quit)", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
-            continue
-        last_sample_time = now
-
-        results = detector.detect_emotions(frame)
-        if results:
-            # 침상 카메라는 환자 1인 기준이므로 첫 번째 검출 결과만 사용
-            scores = results[0]["emotions"]  # 예: {"angry":0.01,"happy":0.7,...}
-            monitor.add(now, scores)
-
-            top_emotion = max(scores, key=scores.get)
-            proxy = EmotionMonitor.proxy_scores(scores)
-            emit_event(
-                "facial",
-                "emotion_classified",
-                {
-                    "top_emotion": top_emotion,
-                    "raw_scores": {k: round(v, 3) for k, v in scores.items()},
-                    "proxy_scores": proxy,
-                    "low_expressivity": max(scores.values(), default=0.0) < FLAT_AFFECT_MAX_SCORE_THRESHOLD,
-                },
-            )
-
-            trend = monitor.trend_ratio()
-            if trend:
-                emit_event("facial", "emotion_trend_update", trend)
-
-        cv2.imshow("emotion-trend-tracker (q to quit)", frame)
-        if cv2.waitKey(1) & 0xFF == ord("q"):
-            break
-
-    cap.release()
-    cv2.destroyAllWindows()
+    finally:
+        cap.release()
+        cv2.destroyAllWindows()
+        write_summary(monitor, run_started_at, source)
 
 
 if __name__ == "__main__":
