@@ -37,3 +37,27 @@ runs/
 
 - 설계 배경, 한계점, 개발 목록은 `../docs/표정감정_설계.md` 참고
 - 2026-09-22 실측: 조명이 어두운 상태에서 웃는 얼굴인데도 sad/neutral이 우세하게 나오는 오분류 확인 → 현재 FER 사전학습 모델은 그대로 채택하기 어렵다고 판단, 보류 중
+
+## landmark_expression_tracker.py (규칙 기반, 신규)
+
+FER 모델의 조명 민감성 문제로 대안으로 만든 버전. MediaPipe FaceMesh 랜드마크로
+직접 규칙을 짜서 판단한다.
+
+```bash
+pip install mediapipe opencv-python numpy
+python landmark_expression_tracker.py
+```
+
+동작 순서:
+1. 실행 후 5초간 "캘리브레이션" — 환자가 평상시 표정을 유지한 상태를 기준선으로 저장
+2. 이후 매 프레임 기준선 대비 변화량(delta) 계산 -> `expression_activity`로 종합
+3. `expression_activity`가 계속 낮으면 `flat_expression_flag: true` — **표정 변화가
+   있는지 없는지를 가장 먼저 보여주는 지표**(파킨슨 가면양 얼굴, 문화적 표현 억제 감지 목적)
+4. delta 조합으로 통증/불안/무기력/평온 프록시 추정 (1차 규칙, 임상 검증 안 됨 - 튜닝 필요)
+
+저장 방식은 FER 버전과 동일하게 `runs/landmark_run_<타임스탬프>.jsonl` + `_summary.json`.
+
+**FER 버전과의 차이**: FER은 사전학습된 블랙박스 모델의 확률을 그대로 쓰지만, 이 버전은
+"기준선 대비 뭐가 얼마나 변했는지"를 직접 계산하기 때문에 조명보다는 얼굴 검출 자체가
+되는지에 더 좌우된다(라이트박스 정도 조명이면 충분). 대신 감정 판단 규칙(가중치)은
+아직 튜닝 전이라 정확도는 별도로 검증해야 함.
