@@ -4,14 +4,22 @@
 
 요구사항 대응
 1. 표정 분석, 감정 상태 분류 -> 사전학습된 FER(Facial Expression Recognition) 모델로
-   7가지 기본 감정(분노/혐오/공포/행복/슬픔/놀람/중립)을 실시간 분류 (커스텀 학습 불필요)
+   7가지 기본 감정(분노/혐오/공포/행복/슬픔/놀람/중립)을 실시간 분류(커스텀 학습 불필요)한 뒤,
+   임상적으로 의미 있는 4종(통증/불안/무기력/평온)으로 프록시 환원한다.
 2. 최근 일정 기간 동안의 감정 변화 비율 기록 -> 매 추론 결과를 이벤트로 로그에 저장하고,
-   슬라이딩 윈도우(예: 최근 1시간/오늘 하루) 기준으로 감정별 비율을 집계
+   슬라이딩 윈도우(기본 1시간) 기준으로 카테고리별 비율을 집계한다.
 3. AI Hub 감정 분류 데이터셋 -> 1차는 아래 FER 사전학습 모델로 데모하고,
-   추후 한국인 대상 데이터로 파인튜닝할 때 이 스크립트의 모델 로딩부만 교체하면 됨
+   추후 한국인/일본인 대상 데이터로 파인튜닝할 때 이 스크립트의 모델 로딩부만 교체하면 됨.
+
+중요한 한계 (docs/표정감정_설계.md 참고)
+- 파킨슨 환자의 가면양 얼굴(hypomimia), 일본 문화권의 표정 표현 억제(display rule) 등
+  이유로 실제 정서 상태와 무관하게 표정 변화 자체가 거의 없을 수 있다.
+- 그래서 이 스크립트는 "표정 변화가 낮음" 자체를 저활성 표정(flat affect) 플래그로 별도
+  탐지하고, 이 플래그가 뜨면 표정 결과만으로 판단하지 말고 챗봇 S 데이터·생체신호 O 데이터와
+  반드시 교차검증하라는 신호를 이벤트에 함께 실어 보낸다.
 
 설치:
-    pip install fer opencv-python pandas tensorflow
+    pip install fer opencv-python tensorflow
 
 사용법:
     python emotion_trend_tracker.py            # 웹캠
@@ -32,13 +40,19 @@ from fer import FER
 # ---------------------------------------------------------------------------
 # 설정
 # ---------------------------------------------------------------------------
-SAMPLE_INTERVAL_SEC = 2.0        # 매 프레임 분석은 과부하 -> 이 간격으로 샘플링
+SAMPLE_INTERVAL_SEC = 2.0          # 매 프레임 분석은 과부하 -> 이 간격으로 샘플링
 LOG_PATH = Path("emotion_events.jsonl")
-TREND_WINDOW_SEC = 60 * 60        # 최근 1시간 기준 추이 계산 (데모 시 짧게 조정 가능)
+TREND_WINDOW_SEC = 60 * 60          # 최근 1시간 기준 추이 계산 (데모 시 짧게 조정 가능)
 
-# 기본 7 감정 -> 임상적으로 의미 있는 프록시로 매핑 (설계 문서 3장 참고)
+# FER 7종 원시 신호 -> 임상 타깃 4종 프록시 매핑 (docs/표정감정_설계.md 표 참고)
+PAIN_PROXY_EMOTIONS = {"angry", "disgust"}        # 미간 찌푸림 등 AU 유사성 근거
 ANXIETY_PROXY_EMOTIONS = {"fear", "surprise"}
 LETHARGY_PROXY_EMOTIONS = {"sad", "neutral"}
+CALM_PROXY_EMOTIONS = {"happy"}
+
+# 저활성 표정(flat affect) 판단 기준
+FLAT_AFFECT_MAX_SCORE_THRESHOLD = 0.35   # 이 값보다 top emotion 확률이 낮으면 "표정이 약함"
+FLAT_AFFECT_RATIO_THRESHOLD = 0.7         # 윈도우 내 이런 프레임이 이 비율 이상이면 플래그 발생
 
 
 @dataclass
@@ -53,29 +67,52 @@ class EmotionMonitor:
         while self.history and now_ts - self.history[0][0] > TREND_WINDOW_SEC:
             self.history.popleft()
 
+    @staticmethod
+    def proxy_scores(scores: dict) -> dict:
+        """FER 7종 확률 -> 통증/불안/무기력/평온 4종 프록시 점수(합산, 0~합계 범위)."""
+        return {
+            "pain": round(sum(scores.get(e, 0.0) for e in PAIN_PROXY_EMOTIONS), 3),
+            "anxiety": round(sum(scores.get(e, 0.0) for e in ANXIETY_PROXY_EMOTIONS), 3),
+            "lethargy": round(sum(scores.get(e, 0.0) for e in LETHARGY_PROXY_EMOTIONS), 3),
+            "calm": round(sum(scores.get(e, 0.0) for e in CALM_PROXY_EMOTIONS), 3),
+        }
+
     def trend_ratio(self) -> dict:
-        """윈도우 내 감정별 평균 점수 비율 + 불안/무기력 프록시 스코어."""
+        """윈도우 내 원시 감정 평균 + 4종 프록시 평균 + 저활성 표정(flat affect) 플래그."""
         if not self.history:
             return {}
 
         totals: dict[str, float] = {}
+        flat_count = 0
         for _, scores in self.history:
             for emo, val in scores.items():
                 totals[emo] = totals.get(emo, 0.0) + val
+            if max(scores.values(), default=0.0) < FLAT_AFFECT_MAX_SCORE_THRESHOLD:
+                flat_count += 1
 
         n = len(self.history)
-        avg = {emo: val / n for emo, val in totals.items()}
+        avg_raw = {emo: val / n for emo, val in totals.items()}
+        avg_proxy = self.proxy_scores(avg_raw)
 
-        anxiety_proxy = sum(avg.get(e, 0.0) for e in ANXIETY_PROXY_EMOTIONS)
-        lethargy_proxy = sum(avg.get(e, 0.0) for e in LETHARGY_PROXY_EMOTIONS)
+        flat_ratio = flat_count / n
+        flat_affect_flag = flat_ratio >= FLAT_AFFECT_RATIO_THRESHOLD
 
-        return {
+        result = {
             "window_sec": TREND_WINDOW_SEC,
             "sample_count": n,
-            "avg_emotion_ratio": {k: round(v, 3) for k, v in avg.items()},
-            "anxiety_proxy": round(anxiety_proxy, 3),
-            "lethargy_proxy": round(lethargy_proxy, 3),
+            "avg_emotion_ratio_raw": {k: round(v, 3) for k, v in avg_raw.items()},
+            "avg_proxy_ratio": avg_proxy,
+            "flat_affect_ratio": round(flat_ratio, 3),
+            "flat_affect_flag": flat_affect_flag,
         }
+        if flat_affect_flag:
+            # 파킨슨(가면양 얼굴) / 일본 문화권(표현 억제) 등으로 표정 자체가 약할 수 있음.
+            # 표정 결과 단독으로 판단하지 말라는 명시적 경고를 이벤트에 함께 싣는다.
+            result["caution"] = (
+                "표정 변화가 지속적으로 낮게 관찰됨 - 표정 결과만으로 정서 상태를 단정하지 말고 "
+                "챗봇 대화(S) 및 생체신호(O) 데이터와 함께 교차검증 필요"
+            )
+        return result
 
 
 def emit_event(module: str, event_type: str, evidence: dict) -> None:
@@ -121,10 +158,16 @@ def main():
             monitor.add(now, scores)
 
             top_emotion = max(scores, key=scores.get)
+            proxy = EmotionMonitor.proxy_scores(scores)
             emit_event(
                 "facial",
                 "emotion_classified",
-                {"top_emotion": top_emotion, "scores": {k: round(v, 3) for k, v in scores.items()}},
+                {
+                    "top_emotion": top_emotion,
+                    "raw_scores": {k: round(v, 3) for k, v in scores.items()},
+                    "proxy_scores": proxy,
+                    "low_expressivity": max(scores.values(), default=0.0) < FLAT_AFFECT_MAX_SCORE_THRESHOLD,
+                },
             )
 
             trend = monitor.trend_ratio()
