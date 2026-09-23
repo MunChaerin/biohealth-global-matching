@@ -197,21 +197,39 @@ class ExpressionMonitor:
             self.history.popleft()
 
     @staticmethod
+    def raw_expression_from_deltas(d: dict) -> dict:
+        """delta 조합 -> 원본 표정(웃음/찡그림) 점수. 임상 프록시로 넘어가기 전 중간 단계라서
+        "찡그렸는데 pain이 왜 안 뜨지?" 같은 디버깅을 여기서 먼저 확인할 수 있다."""
+        smile = clip01(
+            max(0.0, -d["corner_y"]) * 4       # 입꼬리가 기준선보다 위로 올라감
+            + max(0.0, d["mouth_width"]) * 2    # 입이 옆으로 벌어짐 (미소 특유의 폭 증가)
+        )
+        frown = clip01(
+            max(0.0, -d["brow_gap"]) * 4        # 미간이 좁아짐 (눈썹이 서로 가까워짐)
+            + max(0.0, -d["brow_raise"]) * 3     # 눈썹이 아래로 내려옴 (AU4, 찡그림의 핵심 신호)
+        )
+        return {
+            "smile": round(smile, 3),
+            "frown": round(frown, 3),
+        }
+
+    @staticmethod
     def proxy_from_deltas(d: dict) -> dict:
         """delta 조합 -> 통증/불안/무기력/평온 프록시 (1차 추정 규칙, 튜닝 필요)."""
+        raw = ExpressionMonitor.raw_expression_from_deltas(d)
         pain = clip01(
-            max(0.0, -d["brow_gap"]) * 4       # 미간이 좁아짐 (눈썹이 서로 가까워짐)
-            + max(0.0, -d["brow_raise"]) * 3    # 눈썹이 아래로 내려옴 (AU4, 찡그림의 핵심 신호)
+            raw["frown"]
             + max(0.0, -d["mouth_width"]) * 2   # 입이 오므라듦/힘이 들어감
         )
         anxiety = clip01(max(0.0, d["eye_open"]) * 3 + max(0.0, d["brow_raise"]) * 3)
         lethargy = clip01(max(0.0, -d["eye_open"]) * 3 + max(0.0, -d["mouth_open"]) * 1)
-        calm = clip01(max(0.0, -d["corner_y"]) * 4)  # 입꼬리가 기준선보다 위로 - 웃는 쪽
+        calm = clip01(raw["smile"])
         return {
             "pain": round(pain, 3),
             "anxiety": round(anxiety, 3),
             "lethargy": round(lethargy, 3),
             "calm": round(calm, 3),
+            "raw_expression": raw,
         }
 
     def trend_ratio(self) -> dict:
