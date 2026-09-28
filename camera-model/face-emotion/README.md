@@ -38,14 +38,15 @@ runs/
 - 설계 배경, 한계점, 개발 목록은 `../docs/표정감정_설계.md` 참고
 - 2026-09-22 실측: 조명이 어두운 상태에서 웃는 얼굴인데도 sad/neutral이 우세하게 나오는 오분류 확인 → 현재 FER 사전학습 모델은 그대로 채택하기 어렵다고 판단, 보류 중
 
-## landmark_expression_tracker.py (규칙 기반, 신규)
+## landmark_expression_tracker.py (규칙 기반, 현재 메인)
 
 FER 모델의 조명 민감성 문제로 대안으로 만든 버전. MediaPipe FaceMesh 랜드마크로
-직접 규칙을 짜서 판단한다.
+직접 규칙을 짜서 판단한다. 지표 정의와 규칙은 `expression_rules.py`에 분리돼 있다(v2).
 
 ```bash
 pip install mediapipe opencv-python numpy
-python landmark_expression_tracker.py
+python landmark_expression_tracker.py                 # 웹캠
+python landmark_expression_tracker.py --label frown   # 의도한 표정 라벨을 붙여 테스트
 ```
 
 동작 순서:
@@ -53,11 +54,39 @@ python landmark_expression_tracker.py
 2. 이후 매 프레임 기준선 대비 변화량(delta) 계산 -> `expression_activity`로 종합
 3. `expression_activity`가 계속 낮으면 `flat_expression_flag: true` — **표정 변화가
    있는지 없는지를 가장 먼저 보여주는 지표**(파킨슨 가면양 얼굴, 문화적 표현 억제 감지 목적)
-4. delta 조합으로 통증/불안/무기력/평온 프록시 추정 (1차 규칙, 임상 검증 안 됨 - 튜닝 필요)
+4. delta 조합으로 통증/불안/무기력/평온 프록시 추정 + 가장 높은 상태를 `dominant`로 기록
+   (PSPI 참고 규칙, 임상 검증 안 됨 - 튜닝 필요)
 
 저장 방식은 FER 버전과 동일하게 `runs/landmark_run_<타임스탬프>.jsonl` + `_summary.json`.
 
+로그 이벤트 종류:
+- `calibration_sample` — 캘리브레이션 프레임의 핵심 랜드마크 좌표 (재채점용)
+- `landmark_expression` — 프레임별 `deltas`, `expression_activity`, `proxy_scores`
+  (4종 점수 + `dominant` + `raw_expression`(smile/frown) + `actions`(AU 유사 동작 점수)), `key_landmarks`
+- `expression_trend_update` — 윈도우 집계: `avg_proxy_ratio`(프레임별 점수 평균),
+  `dominant_ratio`(상태별 프레임 비율), `flat_expression_flag` 등
+
+`key_landmarks`는 얼굴 영상이 아니라 규칙에 쓰는 랜드마크 15개의 좌표뿐이다.
+
 **FER 버전과의 차이**: FER은 사전학습된 블랙박스 모델의 확률을 그대로 쓰지만, 이 버전은
 "기준선 대비 뭐가 얼마나 변했는지"를 직접 계산하기 때문에 조명보다는 얼굴 검출 자체가
-되는지에 더 좌우된다(라이트박스 정도 조명이면 충분). 대신 감정 판단 규칙(가중치)은
-아직 튜닝 전이라 정확도는 별도로 검증해야 함.
+되는지에 더 좌우된다(라이트박스 정도 조명이면 충분).
+
+## 규칙 튜닝 (evaluate_runs.py)
+
+```bash
+# 1. 표정별로 라벨 붙여 테스트 (각 20~30초, 처음 5초는 무표정 유지)
+python landmark_expression_tracker.py --label neutral
+python landmark_expression_tracker.py --label frown       # -> pain 기대
+python landmark_expression_tracker.py --label smile       # -> calm 기대
+python landmark_expression_tracker.py --label wide_eyes   # -> anxiety 기대
+python landmark_expression_tracker.py --label droopy      # -> lethargy 기대
+
+# 2. 재채점 - 라벨별 평균 점수, 최다 dominant, 프레임 정답률 출력
+python evaluate_runs.py
+
+# 3. expression_rules.py의 RULE_RANGES / 가중치 수정 후 2번 반복 (재녹화 불필요)
+```
+
+v2 이전(9/23까지) 로그는 좌표가 없어서 재채점 대상에서 자동으로 빠진다.
+v1 -> v2에서 무엇을 왜 바꿨는지는 `../docs/표정감정_설계.md`의 "규칙 v2" 참고.
