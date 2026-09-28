@@ -117,7 +117,43 @@ const systemInstructions = `
 5. 진단, 처방, 약물 변경을 확정하지 않는다.
 6. 환자에게 보여줄 문장은 쉽고 짧은 한국어로 작성한다.
 7. 출력은 반드시 제공된 JSON Schema를 따른다.
+8. patientReply에 환자의 말을 그대로 반복하지 않는다. 이번 답변에서 확인된 내용은 subjectivePatch에 기록하고, patientReply에는 공감 표현 한 문장과 다음 미수집 항목을 묻는 질문 하나만 쓴다.
+9. 예: 환자가 "허리 아파"라고 답하면 chiefConcern에 기록하고 "허리가 불편하시군요. 어느 부위가 가장 아픈가요?"처럼 다음 질문을 한다.
 `;
+
+const questionByTarget: Record<string, string> = {
+  identity: "본인이 맞는지 확인해도 될까요?",
+  consent: "현재 상태에 대해 몇 가지 질문을 드려도 될까요?",
+  safety: "지금 당장 급하게 도움이 필요한 증상이 있나요?",
+  chiefConcern: "오늘 가장 불편한 점은 무엇인가요?",
+  location: "불편함은 어느 부위에서 느껴지나요?",
+  severityNrs: "불편한 정도를 0에서 10 사이 숫자로 말씀해 주시겠어요?",
+  onset: "그 증상은 언제부터 시작됐나요?",
+  functionalImpact: "그 증상 때문에 일상생활에서 어려운 점이 있나요?",
+  mood: "최근 기분이나 의욕에 변화가 있었나요?",
+  summary: "지금까지 말씀하신 내용을 정리해드려도 될까요?",
+};
+
+function normalizedText(value: string): string {
+  return value.replace(/[\s.,!?~"'’“”]/g, "").toLowerCase();
+}
+
+export function preventPatientEcho(
+  output: ChatbotTurnOutput,
+  patientText: string,
+): ChatbotTurnOutput {
+  const reply = normalizedText(output.patientReply);
+  const patient = normalizedText(patientText);
+  if (!patient || reply !== patient) {
+    return { ...output, speechText: output.patientReply };
+  }
+
+  const fallback = output.nextQuestionTarget
+    ? questionByTarget[output.nextQuestionTarget]
+    : undefined;
+  const patientReply = fallback ?? "말씀해 주신 내용을 확인했습니다. 조금 더 자세히 말씀해 주시겠어요?";
+  return { ...output, patientReply, speechText: patientReply };
+}
 
 function buildInput(input: ChatbotTurnInput): string {
   const context: ChatbotContext = input.context;
@@ -175,6 +211,6 @@ export class OpenAiChatbotProvider implements ChatbotProvider {
 
     validateChatbotTurnOutput(parsed);
     parsed.subjectivePatch = removeNullSubjectiveValues(parsed.subjectivePatch as Record<string, unknown>);
-    return parsed;
+    return preventPatientEcho(parsed, input.patientText);
   }
 }
