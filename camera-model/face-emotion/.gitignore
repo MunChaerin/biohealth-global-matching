@@ -1,3 +1,4 @@
 # 실행할 때마다 생기는 테스트 로그/요약 - 팀 레포에는 안 올림 (각자 로컬에만 보관)
 runs/
 face_landmarker.task
+__pycache__/

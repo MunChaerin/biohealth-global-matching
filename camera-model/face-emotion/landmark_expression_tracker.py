@@ -43,24 +43,17 @@ Tasks API 기준으로 작성되어 있고, 아래처럼 랜드마커 모델 파
 1. 시작 후 CALIBRATION_SEC 동안 "평상시(캘리브레이션) 얼굴 상태"를 평균내서 기준선으로 저장.
    (환자가 카메라 앞에서 특별한 표정을 짓지 않은 상태를 가정)
 2. 이후 매 프레임마다 기준선 대비 변화량(delta)을 계산.
-   - eye_open: 눈 뜬 정도 (위/아래 눈꺼풀 거리)
-   - brow_raise: 눈썹이 눈에서 얼마나 떨어져 있는지 (올라갔는지)
-   - brow_gap: 양쪽 눈썹 안쪽 사이 거리 (좁아지면 미간 찌푸림)
-   - mouth_open: 입이 벌어진 정도
-   - mouth_width: 입 좌우 폭
-   - corner_y: 입꼬리 높이 (기준선보다 위로 올라가면 음수 delta = 웃는 쪽)
-   모든 거리는 두 눈 바깥쪽 모서리 거리(inter-ocular distance)로 나눠서
-   카메라와의 거리/얼굴 크기 차이에 영향을 덜 받게 정규화한다.
+   지표 정의(eye_open, brow_height, brow_gap, nose_lip, mouth_open, mouth_width,
+   corner_lift)와 프록시 규칙은 expression_rules.py에 있다(v2, PSPI 참고).
 3. expression_activity = 각 delta의 절대값 합 -> "지금 표정이 기준선에서 얼마나
    벗어나 있는지"를 나타내는 단일 수치. 이게 지속적으로 낮으면 저활성 표정
    (flat affect - 파킨슨 가면양 얼굴, 문화적 표현 억제 등) 신호로 본다.
-4. delta 조합으로 통증/불안/무기력/평온 프록시를 규칙 기반으로 추정한다.
-   *** 주의: 이 규칙과 가중치는 1차 추정치이며 임상적으로 검증되지 않았다.
-   실제 환자/배우 데이터로 튜닝이 필요하다 (개발 목록 참고). ***
-
-랜드마크 인덱스 출처: MediaPipe Face Mesh 468/478 landmark 공개 레퍼런스
-(눈 바깥쪽 33/263, 눈꺼풀 상하 159·145 / 386·374, 눈썹 안쪽 107/336,
- 입꼬리 61/291, 윗/아랫입술 중앙 13/14) - Tasks API에서도 동일한 랜드마크 번호 체계 사용.
+4. delta 조합으로 통증/불안/무기력/평온 프록시를 규칙 기반으로 추정하고,
+   가장 높은 것을 dominant로 기록한다(모두 낮으면 "none").
+   *** 주의: 이 규칙과 가중치는 잠정치이며 임상적으로 검증되지 않았다. ***
+5. 매 프레임 핵심 랜드마크 좌표(key_landmarks)도 로그에 남긴다. 규칙을 바꾼 뒤
+   evaluate_runs.py로 예전 실행을 재채점할 수 있어서, 튜닝할 때마다 재녹화할 필요가 없다.
+   (얼굴 영상/이미지는 저장하지 않고 좌표 15개만 저장)
 
 저장 위치
     face-emotion/README.md에 정리된 것과 동일하게 runs/ 폴더에 실행별로 저장된다:
@@ -77,10 +70,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
-import numpy as np
 import mediapipe as mp
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision as mp_vision
+
+from expression_rules import (
+    PROXY_KEYS,
+    extract_metrics,
+    points_from_landmarks,
+    proxy_from_deltas,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -117,61 +116,18 @@ TREND_WINDOW_SEC = 60 * 60
 FLAT_ACTIVITY_THRESHOLD = 0.05   # expression_activity가 이 값 미만이면 "변화 거의 없음"
 FLAT_RATIO_THRESHOLD = 0.7        # 윈도우 내 이런 프레임 비율이 이 이상이면 flat affect 플래그
 
+RULES_VERSION = "v2"             # expression_rules.py 규칙 버전 (summary에 기록)
+
 RUNS_DIR = Path("runs")
-RUNS_DIR.mkdir(exist_ok=True)
 RUN_ID = time.strftime("%Y%m%d_%H-%M-%S")
 LOG_PATH = RUNS_DIR / f"landmark_run_{RUN_ID}.jsonl"
 SUMMARY_PATH = RUNS_DIR / f"landmark_run_{RUN_ID}_summary.json"
-
-# MediaPipe Face Mesh 랜드마크 인덱스 (Tasks API도 동일한 468/478 토폴로지 사용)
-IDX_EYE_OUTER_L, IDX_EYE_OUTER_R = 33, 263          # 정규화 기준(두 눈 바깥쪽 거리)
-IDX_EYE_UP_L, IDX_EYE_DOWN_L = 159, 145              # 왼쪽 눈 위/아래
-IDX_EYE_UP_R, IDX_EYE_DOWN_R = 386, 374              # 오른쪽 눈 위/아래
-IDX_BROW_IN_L, IDX_BROW_IN_R = 107, 336              # 눈썹 안쪽
-IDX_MOUTH_L, IDX_MOUTH_R = 61, 291                   # 입꼬리
-IDX_LIP_UP, IDX_LIP_DOWN = 13, 14                    # 윗/아랫입술 중앙
-
-
-def _dist(a, b) -> float:
-    return float(np.linalg.norm(np.array([a.x, a.y]) - np.array([b.x, b.y])))
-
-
-def extract_metrics(landmarks) -> dict:
-    """정규화된 얼굴 지표 딕셔너리 반환 (모두 inter-ocular distance로 나눔)."""
-    iod = _dist(landmarks[IDX_EYE_OUTER_L], landmarks[IDX_EYE_OUTER_R]) + 1e-6
-
-    eye_open = (
-        _dist(landmarks[IDX_EYE_UP_L], landmarks[IDX_EYE_DOWN_L])
-        + _dist(landmarks[IDX_EYE_UP_R], landmarks[IDX_EYE_DOWN_R])
-    ) / (2 * iod)
-    brow_raise = (
-        _dist(landmarks[IDX_BROW_IN_L], landmarks[IDX_EYE_UP_L])
-        + _dist(landmarks[IDX_BROW_IN_R], landmarks[IDX_EYE_UP_R])
-    ) / (2 * iod)
-    brow_gap = _dist(landmarks[IDX_BROW_IN_L], landmarks[IDX_BROW_IN_R]) / iod
-    mouth_open = _dist(landmarks[IDX_LIP_UP], landmarks[IDX_LIP_DOWN]) / iod
-    mouth_width = _dist(landmarks[IDX_MOUTH_L], landmarks[IDX_MOUTH_R]) / iod
-    corner_y = ((landmarks[IDX_MOUTH_L].y + landmarks[IDX_MOUTH_R].y) / 2) / iod
-
-    return {
-        "eye_open": eye_open,
-        "brow_raise": brow_raise,
-        "brow_gap": brow_gap,
-        "mouth_open": mouth_open,
-        "mouth_width": mouth_width,
-        "corner_y": corner_y,
-    }
-
-
-def clip01(x: float) -> float:
-    return max(0.0, min(1.0, x))
-
 
 @dataclass
 class ExpressionMonitor:
     baseline: dict | None = None
     calibration_samples: list = field(default_factory=list)
-    history: deque = field(default_factory=deque)  # (timestamp, deltas dict, activity)
+    history: deque = field(default_factory=deque)  # (timestamp, deltas dict, activity, proxy dict)
 
     def add_calibration_sample(self, metrics: dict) -> None:
         self.calibration_samples.append(metrics)
@@ -186,67 +142,41 @@ class ExpressionMonitor:
     def deltas(self, metrics: dict) -> dict:
         return {k: round(metrics[k] - self.baseline[k], 4) for k in metrics}
 
-    def add(self, timestamp: float, deltas: dict) -> float:
+    def add(self, timestamp: float, deltas: dict) -> tuple[float, dict]:
         activity = sum(abs(v) for v in deltas.values())
-        self.history.append((timestamp, deltas, activity))
+        proxy = proxy_from_deltas(deltas)
+        self.history.append((timestamp, deltas, activity, proxy))
         self._trim(timestamp)
-        return activity
+        return activity, proxy
 
     def _trim(self, now_ts: float) -> None:
         while self.history and now_ts - self.history[0][0] > TREND_WINDOW_SEC:
             self.history.popleft()
 
-    @staticmethod
-    def raw_expression_from_deltas(d: dict) -> dict:
-        """delta 조합 -> 원본 표정(웃음/찡그림) 점수. 임상 프록시로 넘어가기 전 중간 단계라서
-        "찡그렸는데 pain이 왜 안 뜨지?" 같은 디버깅을 여기서 먼저 확인할 수 있다."""
-        smile = clip01(
-            max(0.0, -d["corner_y"]) * 4       # 입꼬리가 기준선보다 위로 올라감
-            + max(0.0, d["mouth_width"]) * 2    # 입이 옆으로 벌어짐 (미소 특유의 폭 증가)
-        )
-        frown = clip01(
-            max(0.0, -d["brow_gap"]) * 4        # 미간이 좁아짐 (눈썹이 서로 가까워짐)
-            + max(0.0, -d["brow_raise"]) * 3     # 눈썹이 아래로 내려옴 (AU4, 찡그림의 핵심 신호)
-        )
-        return {
-            "smile": round(smile, 3),
-            "frown": round(frown, 3),
-        }
-
-    @staticmethod
-    def proxy_from_deltas(d: dict) -> dict:
-        """delta 조합 -> 통증/불안/무기력/평온 프록시 (1차 추정 규칙, 튜닝 필요)."""
-        raw = ExpressionMonitor.raw_expression_from_deltas(d)
-        pain = clip01(
-            raw["frown"]
-            + max(0.0, -d["mouth_width"]) * 2   # 입이 오므라듦/힘이 들어감
-        )
-        anxiety = clip01(max(0.0, d["eye_open"]) * 3 + max(0.0, d["brow_raise"]) * 3)
-        lethargy = clip01(max(0.0, -d["eye_open"]) * 3 + max(0.0, -d["mouth_open"]) * 1)
-        calm = clip01(raw["smile"])
-        return {
-            "pain": round(pain, 3),
-            "anxiety": round(anxiety, 3),
-            "lethargy": round(lethargy, 3),
-            "calm": round(calm, 3),
-            "raw_expression": raw,
-        }
-
     def trend_ratio(self) -> dict:
         if not self.history:
             return {}
         n = len(self.history)
-        avg_activity = sum(a for _, _, a in self.history) / n
-        flat_count = sum(1 for _, _, a in self.history if a < FLAT_ACTIVITY_THRESHOLD)
+        avg_activity = sum(a for _, _, a, _ in self.history) / n
+        flat_count = sum(1 for _, _, a, _ in self.history if a < FLAT_ACTIVITY_THRESHOLD)
         flat_ratio = flat_count / n
         flat_flag = flat_ratio >= FLAT_RATIO_THRESHOLD
 
         avg_deltas = {}
-        for _, d, _ in self.history:
+        for _, d, _, _ in self.history:
             for k, v in d.items():
                 avg_deltas[k] = avg_deltas.get(k, 0.0) + v
         avg_deltas = {k: round(v / n, 4) for k, v in avg_deltas.items()}
-        avg_proxy = self.proxy_from_deltas(avg_deltas)
+
+        # 프레임별 프록시 점수의 평균 (v1은 평균 delta로 프록시를 한 번 계산해서 서로 다른
+        # 표정이 섞이면 상쇄됐다) + 프레임별 dominant 상태가 차지한 비율
+        avg_proxy = {
+            k: round(sum(p[k] for _, _, _, p in self.history) / n, 3) for k in PROXY_KEYS
+        }
+        dominant_ratio = {}
+        for _, _, _, p in self.history:
+            dominant_ratio[p["dominant"]] = dominant_ratio.get(p["dominant"], 0) + 1
+        dominant_ratio = {k: round(v / n, 3) for k, v in sorted(dominant_ratio.items())}
 
         result = {
             "window_sec": TREND_WINDOW_SEC,
@@ -254,6 +184,7 @@ class ExpressionMonitor:
             "avg_expression_activity": round(avg_activity, 4),
             "avg_deltas": avg_deltas,
             "avg_proxy_ratio": avg_proxy,
+            "dominant_ratio": dominant_ratio,
             "flat_expression_ratio": round(flat_ratio, 3),
             "flat_expression_flag": flat_flag,
         }
@@ -266,7 +197,12 @@ class ExpressionMonitor:
         return result
 
 
-def emit_event(module: str, event_type: str, evidence: dict) -> None:
+def serialize_points(points: dict) -> dict:
+    return {str(i): [round(x, 5), round(y, 5)] for i, (x, y) in points.items()}
+
+
+def log_event(module: str, event_type: str, evidence: dict) -> dict:
+    """이벤트를 로그 파일에만 기록 (콘솔 출력 없음)."""
     event = {
         "patient_id": "demo-patient-01",
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -274,15 +210,23 @@ def emit_event(module: str, event_type: str, evidence: dict) -> None:
         "event_type": event_type,
         "evidence": evidence,
     }
-    print(json.dumps(event, ensure_ascii=False))
     with LOG_PATH.open("a", encoding="utf-8") as f:
         f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    return event
 
 
-def write_summary(monitor: ExpressionMonitor, run_started_at: float, source, label: str | None) -> None:
+def emit_event(module: str, event_type: str, evidence: dict) -> None:
+    event = log_event(module, event_type, evidence)
+    print(json.dumps(event, ensure_ascii=False))
+
+
+def write_summary(monitor: ExpressionMonitor, run_started_at: float, source, label: str | None,
+                  aspect: float | None) -> None:
     summary = {
         "run_id": RUN_ID,
+        "rules_version": RULES_VERSION,
         "source": str(source),
+        "frame_aspect": aspect,  # 랜드마크 x에 곱한 가로/세로 비율 (재채점 시 참고)
         "label": label,  # 테스트할 때 어떤 표정을 의도했는지(--label로 지정) - 나중에 규칙 튜닝할 때 정답지로 씀
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(run_started_at)),
         "ended_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -337,12 +281,14 @@ def main():
     source = args.source
     label = args.label
     cap = cv2.VideoCapture(source)
+    RUNS_DIR.mkdir(exist_ok=True)
 
     landmarker = build_landmarker()
     monitor = ExpressionMonitor()
     run_started_at = time.time()
     last_sample_time = 0.0
     calibrating = True
+    aspect = None
 
     print(f"[실행 시작] 로그: {LOG_PATH}")
     print(f"[캘리브레이션] {CALIBRATION_SEC}초 동안 평상시 표정을 유지해주세요...")
@@ -368,18 +314,21 @@ def main():
 
             if result.face_landmarks:
                 landmarks = result.face_landmarks[0]
-                metrics = extract_metrics(landmarks)
+                aspect = frame.shape[1] / frame.shape[0]
+                points = points_from_landmarks(landmarks, aspect)
+                metrics = extract_metrics(points)
 
                 if calibrating:
                     monitor.add_calibration_sample(metrics)
+                    # 재채점(evaluate_runs.py) 때 기준선을 다시 만들기 위해 좌표 저장
+                    log_event("facial", "calibration_sample", {"key_landmarks": serialize_points(points)})
                     if now - run_started_at >= CALIBRATION_SEC:
                         monitor.finalize_calibration()
                         calibrating = False
                         print(f"[캘리브레이션 완료] 기준선: {monitor.baseline}")
                 else:
                     deltas = monitor.deltas(metrics)
-                    activity = monitor.add(now, deltas)
-                    proxy = monitor.proxy_from_deltas(deltas)
+                    activity, proxy = monitor.add(now, deltas)
 
                     emit_event(
                         "facial",
@@ -389,6 +338,8 @@ def main():
                             "expression_activity": round(activity, 4),
                             "low_activity_frame": activity < FLAT_ACTIVITY_THRESHOLD,
                             "proxy_scores": proxy,
+                            # 규칙 재채점용 (x는 aspect 곱한 값)
+                            "key_landmarks": serialize_points(points),
                         },
                     )
 
@@ -404,7 +355,7 @@ def main():
         cv2.destroyAllWindows()
         landmarker.close()
         if monitor.baseline is not None:
-            write_summary(monitor, run_started_at, source, label)
+            write_summary(monitor, run_started_at, source, label, aspect)
         else:
             print("[경고] 캘리브레이션이 끝나기 전에 종료되어 요약을 저장하지 않음.")
 
