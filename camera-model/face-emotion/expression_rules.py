@@ -70,6 +70,12 @@ RULE_RANGES = {
 PROXY_KEYS = ("pain", "anxiety", "lethargy", "calm")
 DOMINANT_MIN_SCORE = 0.2   # 가장 높은 프록시가 이 값 미만이면 dominant = "none"
 
+# 수면(눈 감음) 판정 - 와상 환자는 눈 감고 있는 시간이 길어서, 이걸 따로 안 빼면
+# 눈 가늘어짐 규칙 때문에 자는 동안 내내 lethargy로 기록된다.
+EYE_CLOSED_RATIO = 0.4     # 눈 뜬 정도가 기준선의 이 비율 미만이면 "눈 감음"
+SLEEP_MIN_SEC = 10.0       # 눈 감음이 이 시간 이상 이어지면 "sleeping" (데모용 값. 실제 운영은 수 분 권장)
+SLEEP_MAX_FROWN = 0.2      # 눈 감고 찡그리는 건 통증 표정(PSPI AU43+AU4)이라 수면으로 보지 않음
+
 
 def points_from_landmarks(landmarks, aspect: float) -> dict:
     """mediapipe 랜드마크 -> {인덱스: (x, y)}. x에 가로/세로 비율을 곱해 단위를 맞춘다."""
@@ -171,3 +177,35 @@ def proxy_from_deltas(d: dict) -> dict:
         "raw_expression": {"smile": round(smile, 3), "frown": round(frown, 3)},
         "actions": a,
     }
+
+
+class SleepDetector:
+    """프레임마다 상태를 돌려준다: "awake" / "eyes_closed"(감은 지 SLEEP_MIN_SEC 미만) / "sleeping".
+
+    - 깜빡임이나 잠깐 눈 감은 건 "eyes_closed"로만 표시하고 감정 판정은 그대로 한다
+      (눈 질끈 감기는 통증 신호일 수 있으므로).
+    - "sleeping"이면 호출하는 쪽에서 감정 판정을 멈추고 dominant를 "sleeping"으로 둔다.
+    - 캘리브레이션을 눈 감은 상태에서 하면 기준선 자체가 감은 눈이라 판정이 안 된다(알려진 한계).
+    """
+
+    def __init__(self):
+        self.closed_since = None
+
+    def update(self, t_sec: float, eye_open: float, baseline_eye_open: float, frown: float) -> str:
+        closed = eye_open < baseline_eye_open * EYE_CLOSED_RATIO and frown < SLEEP_MAX_FROWN
+        if not closed:
+            self.closed_since = None
+            return "awake"
+        if self.closed_since is None:
+            self.closed_since = t_sec
+        return "sleeping" if t_sec - self.closed_since >= SLEEP_MIN_SEC else "eyes_closed"
+
+
+def apply_state(proxy: dict, state: str) -> dict:
+    """수면 중이면 감정 점수를 0으로 두고 dominant를 "sleeping"으로 바꾼다."""
+    proxy["state"] = state
+    if state == "sleeping":
+        for k in PROXY_KEYS:
+            proxy[k] = 0.0
+        proxy["dominant"] = "sleeping"
+    return proxy

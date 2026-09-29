@@ -17,9 +17,16 @@ v1 로그(key_landmarks 없음)는 규칙이 달라 재채점할 수 없어서 �
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
-from expression_rules import PROXY_KEYS, extract_metrics, proxy_from_deltas
+from expression_rules import (
+    PROXY_KEYS,
+    SleepDetector,
+    apply_state,
+    extract_metrics,
+    proxy_from_deltas,
+)
 
 # --label 값 -> 규칙이 내야 하는 dominant 상태
 EXPECTED = {
@@ -31,11 +38,15 @@ EXPECTED = {
     "anxiety": "anxiety",
     "droopy": "lethargy",
     "lethargy": "lethargy",
+    "sleep": "sleeping",     # 눈 감고 편하게 가만히 (SLEEP_MIN_SEC 이후부터 sleeping)
 }
 
 
-def load_frames(jsonl_path: Path) -> tuple[list[dict], list[dict]]:
-    """(캘리브레이션 프레임 key_landmarks 목록, 분석 프레임 key_landmarks 목록)"""
+def load_frames(jsonl_path: Path) -> tuple[list[dict], list[tuple[float, dict]]]:
+    """(캘리브레이션 프레임 key_landmarks 목록, 분석 프레임 (시각(초), key_landmarks) 목록)
+
+    시각은 evidence의 t_sec을 쓰고, 없는 예전 로그(9/29 이전)는 timestamp(초 단위)로 대신한다.
+    """
     calib, frames = [], []
     with jsonl_path.open(encoding="utf-8") as f:
         for line in f:
@@ -46,18 +57,24 @@ def load_frames(jsonl_path: Path) -> tuple[list[dict], list[dict]]:
             if event.get("event_type") == "calibration_sample":
                 calib.append(evidence["key_landmarks"])
             elif event.get("event_type") == "landmark_expression":
-                frames.append(evidence["key_landmarks"])
+                t = evidence.get("t_sec")
+                if t is None:
+                    t = datetime.fromisoformat(event["timestamp"]).timestamp()
+                frames.append((t, evidence["key_landmarks"]))
     return calib, frames
 
 
-def rescore(calib: list[dict], frames: list[dict]) -> list[dict]:
+def rescore(calib: list[dict], frames: list[tuple[float, dict]]) -> list[dict]:
     """저장된 좌표로 지표/기준선을 현재 규칙 정의대로 다시 계산해 프레임별 프록시를 낸다."""
     calib_metrics = [extract_metrics(c) for c in calib]
     baseline = {k: sum(m[k] for m in calib_metrics) / len(calib_metrics) for k in calib_metrics[0]}
+    sleep = SleepDetector()
     result = []
-    for points in frames:
+    for t, points in frames:
         m = extract_metrics(points)
-        result.append(proxy_from_deltas({k: m[k] - baseline[k] for k in m}))
+        proxy = proxy_from_deltas({k: m[k] - baseline[k] for k in m})
+        state = sleep.update(t, m["eye_open"], baseline["eye_open"], proxy["raw_expression"]["frown"])
+        result.append(apply_state(proxy, state))
     return result
 
 

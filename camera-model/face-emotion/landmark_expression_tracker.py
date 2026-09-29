@@ -77,6 +77,8 @@ from mediapipe.tasks.python import vision as mp_vision
 
 from expression_rules import (
     PROXY_KEYS,
+    SleepDetector,
+    apply_state,
     extract_metrics,
     points_from_landmarks,
     proxy_from_deltas,
@@ -129,6 +131,7 @@ class ExpressionMonitor:
     baseline: dict | None = None
     calibration_samples: list = field(default_factory=list)
     history: deque = field(default_factory=deque)  # (timestamp, deltas dict, activity, proxy dict)
+    sleep: SleepDetector = field(default_factory=SleepDetector)
 
     def add_calibration_sample(self, metrics: dict) -> None:
         self.calibration_samples.append(metrics)
@@ -143,9 +146,13 @@ class ExpressionMonitor:
     def deltas(self, metrics: dict) -> dict:
         return {k: round(metrics[k] - self.baseline[k], 4) for k in metrics}
 
-    def add(self, timestamp: float, deltas: dict) -> tuple[float, dict]:
+    def add(self, timestamp: float, metrics: dict, deltas: dict) -> tuple[float, dict]:
         activity = sum(abs(v) for v in deltas.values())
         proxy = proxy_from_deltas(deltas)
+        state = self.sleep.update(
+            timestamp, metrics["eye_open"], self.baseline["eye_open"], proxy["raw_expression"]["frown"]
+        )
+        proxy = apply_state(proxy, state)
         self.history.append((timestamp, deltas, activity, proxy))
         self._trim(timestamp)
         return activity, proxy
@@ -158,30 +165,42 @@ class ExpressionMonitor:
         if not self.history:
             return {}
         n = len(self.history)
-        avg_activity = sum(a for _, _, a, _ in self.history) / n
-        flat_count = sum(1 for _, _, a, _ in self.history if a < FLAT_ACTIVITY_THRESHOLD)
-        flat_ratio = flat_count / n
-        flat_flag = flat_ratio >= FLAT_RATIO_THRESHOLD
-
-        avg_deltas = {}
-        for _, d, _, _ in self.history:
-            for k, v in d.items():
-                avg_deltas[k] = avg_deltas.get(k, 0.0) + v
-        avg_deltas = {k: round(v / n, 4) for k, v in avg_deltas.items()}
-
-        # 프레임별 프록시 점수의 평균 (v1은 평균 delta로 프록시를 한 번 계산해서 서로 다른
-        # 표정이 섞이면 상쇄됐다) + 프레임별 dominant 상태가 차지한 비율
-        avg_proxy = {
-            k: round(sum(p[k] for _, _, _, p in self.history) / n, 3) for k in PROXY_KEYS
-        }
         dominant_ratio = {}
         for _, _, _, p in self.history:
             dominant_ratio[p["dominant"]] = dominant_ratio.get(p["dominant"], 0) + 1
         dominant_ratio = {k: round(v / n, 3) for k, v in sorted(dominant_ratio.items())}
 
+        # 자는 동안은 표정 변화가 원래 없으므로 평균/저활성 계산에서 뺀다
+        # (안 빼면 자는 시간만큼 flat affect 플래그가 잘못 켜짐)
+        awake = [h for h in self.history if h[3]["state"] != "sleeping"]
+        sleeping_ratio = round(1 - len(awake) / n, 3)
+        if not awake:
+            return {
+                "window_sec": TREND_WINDOW_SEC,
+                "sample_count": n,
+                "sleeping_ratio": sleeping_ratio,
+                "dominant_ratio": dominant_ratio,
+            }
+        m = len(awake)
+        avg_activity = sum(a for _, _, a, _ in awake) / m
+        flat_count = sum(1 for _, _, a, _ in awake if a < FLAT_ACTIVITY_THRESHOLD)
+        flat_ratio = flat_count / m
+        flat_flag = flat_ratio >= FLAT_RATIO_THRESHOLD
+
+        avg_deltas = {}
+        for _, d, _, _ in awake:
+            for k, v in d.items():
+                avg_deltas[k] = avg_deltas.get(k, 0.0) + v
+        avg_deltas = {k: round(v / m, 4) for k, v in avg_deltas.items()}
+
+        # 프레임별 프록시 점수의 평균 (v1은 평균 delta로 프록시를 한 번 계산해서 서로 다른
+        # 표정이 섞이면 상쇄됐다) + 프레임별 dominant 상태가 차지한 비율
+        avg_proxy = {k: round(sum(p[k] for _, _, _, p in awake) / m, 3) for k in PROXY_KEYS}
+
         result = {
             "window_sec": TREND_WINDOW_SEC,
             "sample_count": n,
+            "sleeping_ratio": sleeping_ratio,
             "avg_expression_activity": round(avg_activity, 4),
             "avg_deltas": avg_deltas,
             "avg_proxy_ratio": avg_proxy,
@@ -355,6 +374,7 @@ def main():
     last_sample_time = 0.0
     calibrating = True
     aspect = None
+    overlay_text = "calibrating..."   # 화면 왼쪽 위에 현재 판정 표시
 
     print(f"[실행 시작] 로그: {LOG_PATH}")
     print(f"[캘리브레이션] {CALIBRATION_SEC}초 동안 평상시 표정을 유지해주세요...")
@@ -378,6 +398,8 @@ def main():
 
             now = time.time()
             if now - last_sample_time < SAMPLE_INTERVAL_SEC:
+                cv2.putText(frame, overlay_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                            0.8, (0, 255, 0), 2)
                 cv2.imshow("landmark-expression-tracker (q to quit)", frame)
                 if cv2.waitKey(1) & 0xFF == ord("q"):
                     break
@@ -405,12 +427,13 @@ def main():
                         print(f"[캘리브레이션 완료] 기준선: {monitor.baseline}")
                 else:
                     deltas = monitor.deltas(metrics)
-                    activity, proxy = monitor.add(now, deltas)
+                    activity, proxy = monitor.add(now, metrics, deltas)
 
                     emit_event(
                         "facial",
                         "landmark_expression",
                         {
+                            "t_sec": round(now - run_started_at, 2),  # 재채점 시 수면 판정 시간 계산용
                             "deltas": deltas,
                             "expression_activity": round(activity, 4),
                             "frame_brightness": round(raw_brightness, 1),  # 보정 전 원본 밝기
@@ -425,7 +448,10 @@ def main():
                     trend = monitor.trend_ratio()
                     if trend:
                         emit_event("facial", "expression_trend_update", trend)
+                    overlay_text = f"{proxy['dominant']} ({proxy['state']})"
 
+            cv2.putText(frame, overlay_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
+                        0.8, (0, 255, 0), 2)
             cv2.imshow("landmark-expression-tracker (q to quit)", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
