@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1",
     "next": "^15.5.0",
     "openai": "^5.12.0",
     "react": "^19.1.0",
