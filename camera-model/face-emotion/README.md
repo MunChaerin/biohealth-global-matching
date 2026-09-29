@@ -68,6 +68,17 @@ python landmark_expression_tracker.py --label frown   # 의도한 표정 라벨�
 
 `key_landmarks`는 얼굴 영상이 아니라 규칙에 쓰는 랜드마크 15개의 좌표뿐이다.
 
+### 수면(눈 감음) 상태
+
+와상 환자는 눈 감고 있는 시간이 길어서, 따로 빼지 않으면 자는 동안 내내 lethargy로 기록된다.
+- 눈 뜬 정도가 기준선의 40% 미만이면 "눈 감음", 이게 **10초 이상** 이어지면 `sleeping`
+  (`expression_rules.py`의 `SLEEP_MIN_SEC`, 데모용 값 - 실제 운영은 수 분 권장)
+- 눈을 감았어도 **찡그리고 있으면 수면으로 보지 않음** (눈 질끈 감기 + 찡그림은 통증 표정)
+- `sleeping` 동안은 감정 점수를 0으로 두고 `dominant: "sleeping"`, 트렌드의 평균/저활성 계산에서도 제외
+  (`sleeping_ratio`로 따로 집계)
+- 실행 화면 왼쪽 위에 현재 판정(`dominant (state)`)이 표시된다
+
+
 **FER 버전과의 차이**: FER은 사전학습된 블랙박스 모델의 확률을 그대로 쓰지만, 이 버전은
 "기준선 대비 뭐가 얼마나 변했는지"를 직접 계산하기 때문에 조명보다는 얼굴 검출 자체가
 되는지에 더 좌우된다(라이트박스 정도 조명이면 충분).
@@ -81,6 +92,7 @@ python landmark_expression_tracker.py --label frown       # -> pain 기대
 python landmark_expression_tracker.py --label smile       # -> calm 기대
 python landmark_expression_tracker.py --label wide_eyes   # -> anxiety 기대
 python landmark_expression_tracker.py --label droopy      # -> lethargy 기대
+python landmark_expression_tracker.py --label sleep       # -> sleeping 기대 (눈 감고 30초 이상, 처음 10초는 eyes_closed)
 
 # 2. 재채점 - 라벨별 평균 점수, 최다 dominant, 프레임 정답률 출력
 python evaluate_runs.py
