@@ -22,7 +22,9 @@ v2 규칙 (2026-09-28) - v1 테스트 로그(9/23, label별 실측)에서 확인
 
 프록시 설계 근거: PSPI(Prkachin & Solomon Pain Intensity)
    PSPI = AU4(눈썹 내림) + max(AU6, AU7)(눈 주위 조임) + max(AU9, AU10)(코 찡그림/윗입술 올림) + AU43(눈 감음)
-   - 여기서는 AU4 -> brow_lower/brow_squeeze, AU6/7/43 -> eye_narrow, AU9/10 -> lip_raise로 근사.
+   - 여기서는 AU4 -> brow_lower/brow_squeeze, AU6/7/43 -> eye_narrow로 근사.
+     AU9/10 -> lip_raise도 계산하지만 입을 옆으로 늘리면 같이 반응해서 판정에는 안 쓴다(v2.1).
+   - 웃을 때도 AU6(눈 조임)과 눈썹 내림이 같이 나오므로, 입꼬리 웃음(AU12) 만큼 찡그림을 깎는다(v2.1).
    - 단, "눈 가늘어짐"만 있고 찡그림(AU4, AU9/10)이 없으면 통증보다는 졸림/무기력에 가깝다고
      보고, 찡그림이 있을 때만 eye_narrow가 pain 쪽으로 가도록 gate를 둔다.
 
@@ -147,14 +149,18 @@ def proxy_from_deltas(d: dict) -> dict:
     """delta -> 통증/불안/무기력/평온 프록시 (PSPI 참고 규칙, 임상 검증 전)."""
     a = action_scores(d)
 
-    # 찡그림 강도 (AU4 + AU9/10). 이게 있어야 눈 가늘어짐을 통증 쪽으로 해석한다.
-    frown = clip01(max(a["brow_lower"], a["brow_squeeze"]) * 0.7 + a["lip_raise"] * 0.5)
-    gate = min(1.0, frown * 2)
-    smile = clip01(a["corner_up"] * 0.6 + a["mouth_widen"] * 0.4)
+    # 웃음: 입꼬리가 올라가야 인정 (입만 옆으로 벌어지는 건 처진 표정에서도 나옴 - 9/29 droopy 로그)
+    smile = clip01(a["corner_up"] * (0.4 + 0.6 * a["mouth_widen"]))
+
+    # 찡그림 강도 (AU4). lip_raise(AU9/10 근사)는 입을 옆으로 늘리기만 해도 1.0이 떠서
+    # (9/29 smile/droopy 로그 거의 전 프레임) 판정에서 뺐다 - actions에는 계속 기록.
+    # 진짜 웃음(뒤센 미소)은 눈이 가늘어지고 눈썹도 내려와서 찡그림처럼 보이므로 웃음만큼 깎는다.
+    frown = clip01(max(a["brow_lower"], a["brow_squeeze"]) * 0.7 * (1 - smile))
+    gate = min(1.0, frown * 2)   # 찡그림이 있어야 눈 가늘어짐을 통증 쪽으로 해석
 
     pain = clip01(frown * 0.7 + a["eye_narrow"] * gate * 0.3)
     anxiety = clip01(a["brow_raise"] * 0.5 + a["eye_widen"] * 0.5)
-    lethargy = clip01(a["eye_narrow"] * (1 - gate) * 0.7 + a["corner_down"] * 0.3)
+    lethargy = clip01(a["eye_narrow"] * (1 - gate) * 0.7 + a["corner_down"] * 0.6)
     calm = clip01(smile * (1 - frown))
 
     scores = {"pain": pain, "anxiety": anxiety, "lethargy": lethargy, "calm": calm}

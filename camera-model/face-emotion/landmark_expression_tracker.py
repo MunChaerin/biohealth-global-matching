@@ -117,7 +117,7 @@ TREND_WINDOW_SEC = 60 * 60
 FLAT_ACTIVITY_THRESHOLD = 0.05   # expression_activity가 이 값 미만이면 "변화 거의 없음"
 FLAT_RATIO_THRESHOLD = 0.7        # 윈도우 내 이런 프레임 비율이 이 이상이면 flat affect 플래그
 
-RULES_VERSION = "v2"             # expression_rules.py 규칙 버전 (summary에 기록)
+RULES_VERSION = "v2.1"           # expression_rules.py 규칙 버전 (summary에 기록)
 
 RUNS_DIR = Path("runs")
 RUN_ID = time.strftime("%Y%m%d_%H-%M-%S")
