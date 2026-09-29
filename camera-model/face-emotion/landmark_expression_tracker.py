@@ -70,6 +70,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
+import numpy as np
 import mediapipe as mp
 from mediapipe.tasks import python as mp_tasks
 from mediapipe.tasks.python import vision as mp_vision
@@ -276,11 +277,76 @@ def parse_args():
     return parser.parse_args()
 
 
+WEBCAM_WARMUP_READS = 30       # 웹캠은 켜진 직후 몇 프레임 읽기 실패가 흔함 -> 이만큼 재시도
+WEBCAM_MAX_FAILED_READS = 30   # 실행 중 연속으로 이만큼 못 읽으면 카메라 끊김으로 보고 종료
+WEBCAM_SETTLE_SEC = 1.5        # 연결 직후 자동 노출(밝기)이 자리 잡을 때까지 버리는 시간
+
+# OpenCV로 연 웹캠은 카메라 앱보다 어둡게 나오는 경우가 있음(자동 노출 설정 차이).
+# 프레임 평균 밝기가 목표보다 낮으면 감마 보정으로 밝힌다(화면 표시 + 랜드마크 검출 둘 다).
+TARGET_BRIGHTNESS = 110        # 0~255
+MIN_GAMMA = 0.4                # 보정 한계 (너무 어두운 영상을 과하게 밝히면 노이즈만 커짐)
+
+
+def frame_brightness(frame) -> float:
+    return float(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY).mean())
+
+
+def brighten(frame, brightness: float):
+    """평균 밝기가 목표보다 낮으면 감마 보정. (보정된 프레임, 적용한 gamma) 반환."""
+    if brightness >= TARGET_BRIGHTNESS * 0.9 or brightness < 1:
+        return frame, 1.0
+    gamma = max(MIN_GAMMA, np.log(TARGET_BRIGHTNESS / 255) / np.log(brightness / 255))
+    lut = (np.linspace(0, 1, 256) ** gamma * 255).astype(np.uint8)
+    return cv2.LUT(frame, lut), round(float(gamma), 3)
+
+
+def open_capture(source):
+    """웹캠/영상 파일을 열고 첫 프레임까지 확인한다. 실패하면 원인을 알려주고 종료.
+
+    Windows 기본 백엔드(MSMF)에서 웹캠이 안 열리거나 프레임이 안 나오는 경우가 있어서
+    웹캠이면 DirectShow(CAP_DSHOW)로 한 번 더 시도한다.
+    """
+    is_webcam = isinstance(source, int) or str(source).isdigit()
+    if not is_webcam:
+        cap = cv2.VideoCapture(source)
+        if not cap.isOpened():
+            raise SystemExit(f"[오류] 영상 파일을 열 수 없습니다: {source}")
+        return cap, False
+
+    index = int(source)
+    for backend, name in ((cv2.CAP_ANY, "기본"), (cv2.CAP_DSHOW, "DirectShow")):
+        cap = cv2.VideoCapture(index, backend)
+        if cap.isOpened():
+            if backend == cv2.CAP_DSHOW:
+                cap.set(cv2.CAP_PROP_AUTO_EXPOSURE, 0.75)  # DirectShow: 0.75 = 자동 노출 켜기
+            for _ in range(WEBCAM_WARMUP_READS):
+                ok, frame = cap.read()
+                if ok:
+                    settle_until = time.time() + WEBCAM_SETTLE_SEC
+                    while time.time() < settle_until:
+                        ok, new_frame = cap.read()
+                        if ok:
+                            frame = new_frame
+                    print(f"[카메라] {index}번 카메라 연결됨 ({name} 백엔드), "
+                          f"원본 밝기 {frame_brightness(frame):.0f}/255 "
+                          f"(목표 {TARGET_BRIGHTNESS} 미만이면 자동 보정)")
+                    return cap, True
+                time.sleep(0.1)
+        cap.release()
+    raise SystemExit(
+        f"[오류] {index}번 카메라에서 영상을 받을 수 없습니다.\n"
+        "  - 줌/팀즈/카메라 앱 등 다른 프로그램이 카메라를 쓰고 있지 않은지 확인\n"
+        "  - 이전에 실행한 트래커 창이 아직 떠 있지 않은지 확인\n"
+        "  - Windows 설정 > 개인 정보 > 카메라에서 데스크톱 앱 접근 허용 확인\n"
+        "  - 외장 웹캠이면 다른 번호로 시도: python landmark_expression_tracker.py 1 --label ..."
+    )
+
+
 def main():
     args = parse_args()
     source = args.source
     label = args.label
-    cap = cv2.VideoCapture(source)
+    cap, is_webcam = open_capture(source)
     RUNS_DIR.mkdir(exist_ok=True)
 
     landmarker = build_landmarker()
@@ -293,11 +359,22 @@ def main():
     print(f"[실행 시작] 로그: {LOG_PATH}")
     print(f"[캘리브레이션] {CALIBRATION_SEC}초 동안 평상시 표정을 유지해주세요...")
 
+    failed_reads = 0
     try:
         while cap.isOpened():
             ok, frame = cap.read()
             if not ok:
-                break
+                failed_reads += 1
+                if not is_webcam:
+                    break  # 영상 파일 끝
+                if failed_reads >= WEBCAM_MAX_FAILED_READS:
+                    print(f"[오류] 카메라에서 {failed_reads}번 연속으로 영상을 못 받아 종료합니다.")
+                    break
+                time.sleep(0.05)
+                continue
+            failed_reads = 0
+            raw_brightness = frame_brightness(frame)
+            frame, gamma = brighten(frame, raw_brightness)
 
             now = time.time()
             if now - last_sample_time < SAMPLE_INTERVAL_SEC:
@@ -336,6 +413,8 @@ def main():
                         {
                             "deltas": deltas,
                             "expression_activity": round(activity, 4),
+                            "frame_brightness": round(raw_brightness, 1),  # 보정 전 원본 밝기
+                            "brightness_gamma": gamma,                     # 1.0 = 보정 안 함
                             "low_activity_frame": activity < FLAT_ACTIVITY_THRESHOLD,
                             "proxy_scores": proxy,
                             # 규칙 재채점용 (x는 aspect 곱한 값)
