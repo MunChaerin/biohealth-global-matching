@@ -67,6 +67,14 @@ RULE_RANGES = {
     "mouth_widen":  (0.020, 0.10),   # 입 옆으로 벌어짐 (미소)
 }
 
+# 눈을 감으면 찡그리지 않아도 눈썹이 내려오고 미간이 좁아진다.
+# (9/29 sleep 녹화: 편하게 감았을 때 brow_height -0.031~-0.041, brow_gap -0.015~-0.021
+#  vs 눈 감고 찡그림 brow_height 중앙값 -0.073) -> 눈 감았을 땐 이 구간으로 판정
+CLOSED_EYE_RANGES = {
+    "brow_lower":   (0.045, 0.08),
+    "brow_squeeze": (0.025, 0.05),
+}
+
 PROXY_KEYS = ("pain", "anxiety", "lethargy", "calm")
 DOMINANT_MIN_SCORE = 0.2   # 가장 높은 프록시가 이 값 미만이면 dominant = "none"
 
@@ -135,8 +143,13 @@ def clip01(x: float) -> float:
     return max(0.0, min(1.0, x))
 
 
-def action_scores(d: dict) -> dict:
-    """delta -> 개별 표정 동작(AU 유사) 점수 0~1. 프록시로 가기 전 중간 단계라 디버깅용으로도 로깅한다."""
+def eyes_closed(metrics: dict, baseline: dict) -> bool:
+    return metrics["eye_open"] < baseline["eye_open"] * EYE_CLOSED_RATIO
+
+
+def action_scores(d: dict, closed: bool = False) -> dict:
+    """delta -> 개별 표정 동작(AU 유사) 점수 0~1. 프록시로 가기 전 중간 단계라 디버깅용으로도 로깅한다.
+    closed=True(눈 감음)면 눈썹 관련 동작은 CLOSED_EYE_RANGES 기준으로 판정."""
     signed = {
         "eye_narrow": -d["eye_open"],
         "eye_widen": d["eye_open"],
@@ -148,12 +161,14 @@ def action_scores(d: dict) -> dict:
         "corner_down": -d["corner_lift"],
         "mouth_widen": d["mouth_width"],
     }
-    return {k: round(ramp(v, *RULE_RANGES[k]), 3) for k, v in signed.items()}
+    ranges = {**RULE_RANGES, **CLOSED_EYE_RANGES} if closed else RULE_RANGES
+    return {k: round(ramp(v, *ranges[k]), 3) for k, v in signed.items()}
 
 
-def proxy_from_deltas(d: dict) -> dict:
-    """delta -> 통증/불안/무기력/평온 프록시 (PSPI 참고 규칙, 임상 검증 전)."""
-    a = action_scores(d)
+def proxy_from_deltas(d: dict, closed: bool = False) -> dict:
+    """delta -> 통증/불안/무기력/평온 프록시 (PSPI 참고 규칙, 임상 검증 전).
+    closed: 눈을 감은 프레임인지 (eyes_closed()로 계산)."""
+    a = action_scores(d, closed)
 
     # 웃음: 입꼬리가 올라가야 인정 (입만 옆으로 벌어지는 건 처진 표정에서도 나옴 - 9/29 droopy 로그)
     smile = clip01(a["corner_up"] * (0.4 + 0.6 * a["mouth_widen"]))
@@ -191,9 +206,8 @@ class SleepDetector:
     def __init__(self):
         self.closed_since = None
 
-    def update(self, t_sec: float, eye_open: float, baseline_eye_open: float, frown: float) -> str:
-        closed = eye_open < baseline_eye_open * EYE_CLOSED_RATIO and frown < SLEEP_MAX_FROWN
-        if not closed:
+    def update(self, t_sec: float, closed: bool, frown: float) -> str:
+        if not (closed and frown < SLEEP_MAX_FROWN):
             self.closed_since = None
             return "awake"
         if self.closed_since is None:

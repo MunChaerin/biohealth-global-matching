@@ -25,6 +25,7 @@ from expression_rules import (
     SleepDetector,
     apply_state,
     extract_metrics,
+    eyes_closed,
     proxy_from_deltas,
 )
 
@@ -72,8 +73,9 @@ def rescore(calib: list[dict], frames: list[tuple[float, dict]]) -> list[dict]:
     result = []
     for t, points in frames:
         m = extract_metrics(points)
-        proxy = proxy_from_deltas({k: m[k] - baseline[k] for k in m})
-        state = sleep.update(t, m["eye_open"], baseline["eye_open"], proxy["raw_expression"]["frown"])
+        closed = eyes_closed(m, baseline)
+        proxy = proxy_from_deltas({k: m[k] - baseline[k] for k in m}, closed)
+        state = sleep.update(t, closed, proxy["raw_expression"]["frown"])
         result.append(apply_state(proxy, state))
     return result
 

@@ -80,6 +80,7 @@ from expression_rules import (
     SleepDetector,
     apply_state,
     extract_metrics,
+    eyes_closed,
     points_from_landmarks,
     proxy_from_deltas,
 )
@@ -148,10 +149,9 @@ class ExpressionMonitor:
 
     def add(self, timestamp: float, metrics: dict, deltas: dict) -> tuple[float, dict]:
         activity = sum(abs(v) for v in deltas.values())
-        proxy = proxy_from_deltas(deltas)
-        state = self.sleep.update(
-            timestamp, metrics["eye_open"], self.baseline["eye_open"], proxy["raw_expression"]["frown"]
-        )
+        closed = eyes_closed(metrics, self.baseline)
+        proxy = proxy_from_deltas(deltas, closed)
+        state = self.sleep.update(timestamp, closed, proxy["raw_expression"]["frown"])
         proxy = apply_state(proxy, state)
         self.history.append((timestamp, deltas, activity, proxy))
         self._trim(timestamp)
