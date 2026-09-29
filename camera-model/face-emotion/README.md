@@ -64,9 +64,15 @@ python landmark_expression_tracker.py --label frown   # 의도한 표정 라벨�
 - `landmark_expression` — 프레임별 `deltas`, `expression_activity`, `proxy_scores`
   (4종 점수 + `dominant` + `raw_expression`(smile/frown) + `actions`(AU 유사 동작 점수)), `key_landmarks`
 - `expression_trend_update` — 윈도우 집계: `avg_proxy_ratio`(프레임별 점수 평균),
-  `dominant_ratio`(상태별 프레임 비율), `flat_expression_flag` 등
+  `dominant_ratio`(상태별 프레임 비율), `flat_expression_flag` 등. 누적 집계라 **60초마다만** 기록
+  (`TREND_LOG_INTERVAL_SEC`), 마지막 집계는 `_summary.json`의 `final_trend`
 
 `key_landmarks`는 얼굴 영상이 아니라 규칙에 쓰는 랜드마크 15개의 좌표뿐이다.
+
+**시간축(`t_sec`)**: 웹캠은 실제 경과 시간, 영상 파일은 **영상 안의 시간**(`CAP_PROP_POS_MSEC`, 없으면
+프레임 번호/FPS)을 쓴다. 영상 파일은 실제 재생보다 빠르게 처리되기 때문에, 벽시계를 쓰면 수면 판정(10초)과
+샘플 간격·트렌드 윈도우가 영상 시간과 어긋난다. `_summary.json`의 `duration_sec`은 실제 실행 시간,
+`analyzed_sec`은 분석 시간축 길이다.
 
 ### 수면(눈 감음) 상태
 

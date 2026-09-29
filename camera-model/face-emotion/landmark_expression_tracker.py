@@ -116,6 +116,7 @@ MODEL_PATH = _resolve_model_path()
 CALIBRATION_SEC = 5.0        # 시작 후 이 시간 동안은 기준선 수집 (환자에게 안내 문구 필요)
 SAMPLE_INTERVAL_SEC = 0.5     # 랜드마크 추출은 FER보다 가벼워서 더 자주 샘플링 가능
 TREND_WINDOW_SEC = 60 * 60
+TREND_LOG_INTERVAL_SEC = 60   # expression_trend_update 이벤트 기록 주기 (분석 시간축 기준)
 
 FLAT_ACTIVITY_THRESHOLD = 0.05   # expression_activity가 이 값 미만이면 "변화 거의 없음"
 FLAT_RATIO_THRESHOLD = 0.7        # 윈도우 내 이런 프레임 비율이 이 이상이면 flat affect 플래그
@@ -241,7 +242,7 @@ def emit_event(module: str, event_type: str, evidence: dict) -> None:
 
 
 def write_summary(monitor: ExpressionMonitor, run_started_at: float, source, label: str | None,
-                  aspect: float | None) -> None:
+                  aspect: float | None, analyzed_sec: float) -> None:
     summary = {
         "run_id": RUN_ID,
         "rules_version": RULES_VERSION,
@@ -250,7 +251,8 @@ def write_summary(monitor: ExpressionMonitor, run_started_at: float, source, lab
         "label": label,  # 테스트할 때 어떤 표정을 의도했는지(--label로 지정) - 나중에 규칙 튜닝할 때 정답지로 씀
         "started_at": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(run_started_at)),
         "ended_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "duration_sec": round(time.time() - run_started_at, 1),
+        "duration_sec": round(time.time() - run_started_at, 1),   # 실제 실행 시간 (벽시계)
+        "analyzed_sec": round(analyzed_sec, 1),   # 분석 시간축 길이 (영상 파일이면 영상 시간)
         "baseline": monitor.baseline,
         "total_samples": len(monitor.history),
         "final_trend": monitor.trend_ratio(),
@@ -361,26 +363,56 @@ def open_capture(source):
     )
 
 
+class MediaClock:
+    """분석에 쓰는 시간축(초, 시작 = 0).
+
+    웹캠은 실제 경과 시간(monotonic), 영상 파일은 영상 안의 시간을 쓴다. 영상 파일은 실제 재생 속도보다
+    빠르게 처리될 수 있어서, 벽시계로 재면 수면 판정(10초)·샘플 간격·트렌드 윈도우가 영상 시간과 어긋난다.
+    """
+
+    def __init__(self, cap, is_webcam: bool):
+        self.cap = cap
+        self.is_webcam = is_webcam
+        self.started = time.monotonic()
+        self.fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        self.frames_read = 0
+
+    def on_frame(self) -> float:
+        """프레임을 하나 읽을 때마다 호출. 그 프레임의 시각을 돌려준다."""
+        self.frames_read += 1
+        if self.is_webcam:
+            return time.monotonic() - self.started
+        pos_ms = self.cap.get(cv2.CAP_PROP_POS_MSEC)
+        if pos_ms and pos_ms > 0:
+            return pos_ms / 1000
+        return (self.frames_read - 1) / self.fps   # 컨테이너가 위치 시간을 안 주면 프레임 번호/FPS
+
+
 def main():
     args = parse_args()
     source = args.source
     label = args.label
-    cap, is_webcam = open_capture(source)
     RUNS_DIR.mkdir(exist_ok=True)
 
+    # 모델을 먼저 만들어 두고 카메라를 연다 (모델 파일이 없어 실패해도 카메라가 켜진 채로 남지 않게)
     landmarker = build_landmarker()
+    cap = None
     monitor = ExpressionMonitor()
     run_started_at = time.time()
-    last_sample_time = 0.0
+    last_sample_time = None
+    last_trend_log_time = None
+    now = 0.0
     calibrating = True
     aspect = None
     overlay_text = "calibrating..."   # 화면 왼쪽 위에 현재 판정 표시
 
-    print(f"[실행 시작] 로그: {LOG_PATH}")
-    print(f"[캘리브레이션] {CALIBRATION_SEC}초 동안 평상시 표정을 유지해주세요...")
-
     failed_reads = 0
     try:
+        cap, is_webcam = open_capture(source)
+        clock = MediaClock(cap, is_webcam)
+        print(f"[실행 시작] 로그: {LOG_PATH}")
+        print(f"[캘리브레이션] {CALIBRATION_SEC}초 동안 평상시 표정을 유지해주세요...")
+
         while cap.isOpened():
             ok, frame = cap.read()
             if not ok:
@@ -393,11 +425,11 @@ def main():
                 time.sleep(0.05)
                 continue
             failed_reads = 0
+            now = clock.on_frame()
             raw_brightness = frame_brightness(frame)
             frame, gamma = brighten(frame, raw_brightness)
 
-            now = time.time()
-            if now - last_sample_time < SAMPLE_INTERVAL_SEC:
+            if last_sample_time is not None and now - last_sample_time < SAMPLE_INTERVAL_SEC:
                 cv2.putText(frame, overlay_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
                             0.8, (0, 255, 0), 2)
                 cv2.imshow("landmark-expression-tracker (q to quit)", frame)
@@ -408,8 +440,7 @@ def main():
 
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
-            timestamp_ms = int((now - run_started_at) * 1000)
-            result = landmarker.detect_for_video(mp_image, timestamp_ms)
+            result = landmarker.detect_for_video(mp_image, int(now * 1000))
 
             if result.face_landmarks:
                 landmarks = result.face_landmarks[0]
@@ -421,7 +452,7 @@ def main():
                     monitor.add_calibration_sample(metrics)
                     # 재채점(evaluate_runs.py) 때 기준선을 다시 만들기 위해 좌표 저장
                     log_event("facial", "calibration_sample", {"key_landmarks": serialize_points(points)})
-                    if now - run_started_at >= CALIBRATION_SEC:
+                    if now >= CALIBRATION_SEC:
                         monitor.finalize_calibration()
                         calibrating = False
                         print(f"[캘리브레이션 완료] 기준선: {monitor.baseline}")
@@ -433,7 +464,7 @@ def main():
                         "facial",
                         "landmark_expression",
                         {
-                            "t_sec": round(now - run_started_at, 2),  # 재채점 시 수면 판정 시간 계산용
+                            "t_sec": round(now, 2),  # 분석 시간축(영상 파일이면 영상 시간) - 재채점 시 수면 판정용
                             "deltas": deltas,
                             "expression_activity": round(activity, 4),
                             "frame_brightness": round(raw_brightness, 1),  # 보정 전 원본 밝기
@@ -445,9 +476,13 @@ def main():
                         },
                     )
 
-                    trend = monitor.trend_ratio()
-                    if trend:
-                        emit_event("facial", "expression_trend_update", trend)
+                    # 트렌드 요약은 누적 집계라 매 프레임 남기면 같은 내용이 반복되므로 주기적으로만 기록
+                    # (마지막 집계는 종료 시 summary.json의 final_trend에 들어감)
+                    if last_trend_log_time is None or now - last_trend_log_time >= TREND_LOG_INTERVAL_SEC:
+                        trend = monitor.trend_ratio()
+                        if trend:
+                            emit_event("facial", "expression_trend_update", {"t_sec": round(now, 2), **trend})
+                            last_trend_log_time = now
                     overlay_text = f"{proxy['dominant']} ({proxy['state']})"
 
             cv2.putText(frame, overlay_text, (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
@@ -456,11 +491,12 @@ def main():
             if cv2.waitKey(1) & 0xFF == ord("q"):
                 break
     finally:
-        cap.release()
+        if cap is not None:
+            cap.release()
         cv2.destroyAllWindows()
         landmarker.close()
         if monitor.baseline is not None:
-            write_summary(monitor, run_started_at, source, label, aspect)
+            write_summary(monitor, run_started_at, source, label, aspect, now)
         else:
             print("[경고] 캘리브레이션이 끝나기 전에 종료되어 요약을 저장하지 않음.")
 
