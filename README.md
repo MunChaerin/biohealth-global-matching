@@ -288,6 +288,56 @@ AI가 생성한 평가와 치료 계획은 의료진의 검토와 최종 판단�
 
 ---
 
+## 로컬 개발 시작
+
+Node.js 의존성을 설치한 뒤 개발 서버를 실행합니다.
+
+```bash
+pnpm install
+pnpm dev
+```
+
+실제 OpenAI API를 사용하려면 프로젝트 루트에 `.env.local` 파일을 만들고 서버 환경변수를 설정합니다.
+
+```env
+OPENAI_API_KEY=발급받은_API_키
+OPENAI_MODEL=gpt-4o-mini
+```
+
+API 키는 브라우저 코드에 넣지 않고 서버의 `/api/chat` 라우트에서만 사용합니다.
+
+### 챗봇 API 요청 예시
+
+```bash
+curl -X POST http://localhost:3000/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "context": {
+      "sessionId": "session-1",
+      "patientId": "patient-1",
+      "state": "CHIEF_CONCERN",
+      "messages": [],
+      "subjective": {},
+      "safetyFlags": []
+    },
+    "patientText": "허리가 아파요."
+  }'
+```
+
+응답은 챗봇 문장, 다음 상태, S 정보 변경값, 누락 정보, 안전 신호를 포함한 JSON으로 반환됩니다.
+
+### 검증 명령어
+
+```bash
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+OpenAI API가 연결되지 않은 상황에서도 `MockChatbotProvider`를 사용하여 챗봇 흐름과 안전 분기를 테스트할 수 있습니다.
+
+---
+
 ## Vision
 
 > 환자의 일상을 의료진의 판단과 연결하여, 더 세심하고 지속적인 돌봄을 지원합니다.
