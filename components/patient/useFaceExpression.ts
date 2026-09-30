@@ -18,6 +18,24 @@ const MODEL_URL =
 const SAMPLE_INTERVAL_MS = 500; // 표정 판정 간격
 const REPORT_INTERVAL_MS = 10_000; // 의료진 화면으로 보내는 간격 (상태가 바뀌면 바로 보냄)
 
+let infoLogFilterInstalled = false;
+
+/**
+ * MediaPipe wasm은 "INFO: Created TensorFlow Lite XNNPACK delegate for CPU." 같은 안내 로그를
+ * console.error로 찍어서, Next.js 개발 모드 화면에 빨간 오류처럼 뜬다. 실제 오류는 아니므로 "INFO:"로
+ * 시작하는 메시지만 걸러낸다. wasm이 처음 로드될 때 console.error를 bind해 두기 때문에 모델을 불러오기
+ * 전에 설치해야 하고, 되돌리지 않는다 (나머지 메시지는 원래 console.error로 그대로 전달).
+ */
+export function filterMediapipeInfoLogs() {
+  if (infoLogFilterInstalled) return;
+  infoLogFilterInstalled = true;
+  const original = console.error.bind(console);
+  console.error = (...args: unknown[]) => {
+    if (typeof args[0] === "string" && args[0].startsWith("INFO:")) return;
+    original(...args);
+  };
+}
+
 function cameraErrorStatus(error: unknown): CameraStatus {
   const name = (error as { name?: string })?.name;
   return name === "NotAllowedError" || name === "SecurityError" ? "permissionDenied" : "unavailable";
@@ -115,6 +133,7 @@ export function useFaceExpression(patientId: string = DEMO_PATIENT_ID) {
         return;
       }
       try {
+        filterMediapipeInfoLogs();
         const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision");
         const fileset = await FilesetResolver.forVisionTasks(WASM_URL);
         const created = await FaceLandmarker.createFromOptions(fileset, {
