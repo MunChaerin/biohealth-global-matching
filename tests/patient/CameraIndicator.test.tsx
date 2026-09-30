@@ -79,6 +79,8 @@ describe("CameraIndicator", () => {
 
     const { unmount } = render(<CameraIndicator />);
     expect(await screen.findByText("표정 관찰 카메라 작동 중")).toBeInTheDocument();
+    expect(screen.getByText("평소 표정으로 잠시 계셔 주세요")).toBeInTheDocument();
+    expect(screen.getByLabelText("표정 관찰 카메라 미리보기")).toBeInTheDocument();
     expect(postedReports()[0]).toMatchObject({ status: "calibrating" });
 
     unmount();
