@@ -19,15 +19,17 @@ const messages: Record<CameraStatus, { text: string; hint?: string; active: bool
  * 영상은 브라우저 안에서만 쓰고 저장·전송하지 않는다.
  */
 export function CameraIndicator() {
-  const { videoRef, status } = useFaceExpression();
+  const { videoRef, status, previewFilter } = useFaceExpression();
   const { text, hint, active } = messages[status];
 
   return (
-    <div className={styles.cameraIndicator} role="status">
-      {/* video 요소는 카메라 연결 전부터 있어야 해서 항상 그리고, 작동 중일 때만 보이게 한다 */}
+    <div className={`${styles.cameraIndicator} ${active ? styles.cameraLive : ""}`} role="status">
+      {/* video 요소는 카메라 연결 전부터 있어야 해서 항상 그리고, 작동 중일 때만 카드 전체에 보이게 한다.
+          어두운 영상은 분석용 프레임과 마찬가지로 미리보기도 밝게 보정한다. */}
       <video
         ref={videoRef}
         className={active ? styles.cameraPreview : styles.hiddenVideo}
+        style={previewFilter !== 1 ? { filter: `brightness(${previewFilter})` } : undefined}
         muted
         playsInline
         aria-label="표정 관찰 카메라 미리보기"

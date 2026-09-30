@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { FaceLandmarker } from "@mediapipe/tasks-vision";
+import { applyGamma, frameBrightness, gammaFor, previewBrightness } from "../../lib/camera/brightness";
 import { ExpressionMonitor, TREND_WINDOW_MS } from "../../lib/camera/expressionMonitor";
 import { extractMetrics, pointsFromLandmarks } from "../../lib/camera/expressionRules";
 import { DEMO_PATIENT_ID, type CameraReport, type CameraStatus } from "../../lib/camera/report";
@@ -55,11 +56,13 @@ async function sendReport(report: CameraReport): Promise<void> {
 
 /**
  * 환자 화면이 열려 있는 동안 웹캠으로 표정을 계속 분석하고, 판정 결과(숫자)만 /api/camera로 보낸다.
- * 영상은 브라우저 밖으로 나가지 않는다. 반환한 videoRef는 화면에 보이지 않는 video 요소에 연결한다.
+ * 영상은 브라우저 밖으로 나가지 않는다. 반환한 videoRef는 미리보기 video 요소에 연결하고,
+ * previewFilter(밝기 배율)는 어두운 영상일 때 미리보기를 밝게 보여주는 데 쓴다.
  */
 export function useFaceExpression(patientId: string = DEMO_PATIENT_ID) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<CameraStatus>("starting");
+  const [previewFilter, setPreviewFilter] = useState(1);
 
   useEffect(() => {
     // 카메라 기능이 없는 환경(테스트, 오래된 브라우저, https가 아닌 주소)에서는 켜지 않고 보고도 하지 않는다
@@ -75,6 +78,9 @@ export function useFaceExpression(patientId: string = DEMO_PATIENT_ID) {
     let currentStatus: CameraStatus = "starting";
     let lastSample: ExpressionSample | null = null;
     let lastReportAt = 0;
+    let canvas: HTMLCanvasElement | undefined;
+    let context: CanvasRenderingContext2D | null | undefined;
+    let lastPreviewBrightness = 1;
     const monitor = new ExpressionMonitor();
 
     function report(nextStatus: CameraStatus, force = false) {
@@ -94,12 +100,34 @@ export function useFaceExpression(patientId: string = DEMO_PATIENT_ID) {
       void sendReport(payload);
     }
 
+    /** 분석할 프레임. 어두우면 캔버스에 옮겨 감마 보정한 것을, 아니면 video를 그대로 쓴다. */
+    function correctedFrame(video: HTMLVideoElement): HTMLVideoElement | HTMLCanvasElement {
+      canvas ??= document.createElement("canvas");
+      context ??= canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) return video;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      context.drawImage(video, 0, 0);
+      const image = context.getImageData(0, 0, canvas.width, canvas.height);
+      const brightness = frameBrightness(image.data);
+      const nextPreview = Math.round(previewBrightness(brightness) * 10) / 10;
+      if (nextPreview !== lastPreviewBrightness) {
+        lastPreviewBrightness = nextPreview;
+        setPreviewFilter(nextPreview);
+      }
+      const gamma = gammaFor(brightness);
+      if (gamma === 1) return video;
+      applyGamma(image.data, gamma);
+      context.putImageData(image, 0, 0);
+      return canvas;
+    }
+
     function tick() {
       if (cancelled) return;
       const video = videoRef.current;
       if (video && landmarker && video.readyState >= 2 && video.videoWidth > 0) {
         const timeMs = performance.now();
-        const result = landmarker.detectForVideo(video, timeMs);
+        const result = landmarker.detectForVideo(correctedFrame(video), timeMs);
         const landmarks = result.faceLandmarks[0];
         if (!landmarks) {
           report("noFace");
@@ -180,5 +208,5 @@ export function useFaceExpression(patientId: string = DEMO_PATIENT_ID) {
     };
   }, [patientId]);
 
-  return { videoRef, status };
+  return { videoRef, status, previewFilter };
 }
