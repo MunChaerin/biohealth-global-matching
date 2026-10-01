@@ -32,6 +32,7 @@ export function PatientChat() {
   const [callStatus, setCallStatus] = useState<"requested" | "acknowledged" | null>(null);
   const [callAcknowledged, setCallAcknowledged] = useState(false);
   const [largeText, setLargeText] = useState(false);
+  const [motionStatus, setMotionStatus] = useState<"lowMovement" | "still" | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [medicationTaken, setMedicationTaken] = useState(false);
   const language = context.language ?? "ko";
@@ -73,6 +74,22 @@ export function PatientChat() {
     return () => window.clearInterval(interval);
   }, [persona.id]);
 
+  useEffect(() => {
+    const updateMotion = async () => {
+      try {
+        const response = await fetch(`/api/motion?patientId=${persona.id}&t=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const status = ((await response.json()) as { report?: { status?: string } }).report?.status;
+        setMotionStatus(status === "lowMovement" || status === "still" ? status : null);
+      } catch {
+        // 모션 상태 조회 실패가 대화를 막지 않도록 한다.
+      }
+    };
+    void updateMotion();
+    const interval = window.setInterval(updateMotion, 3000);
+    return () => window.clearInterval(interval);
+  }, [persona.id]);
+
   async function callClinician() {
     const response = await fetch("/api/care/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: persona.id, sessionId: context.sessionId }) });
     if (response.ok) {
@@ -106,6 +123,7 @@ export function PatientChat() {
       </section>
 
       <div className={styles.notice}><span>i</span><p>{copy.notice}</p></div>
+      {motionStatus ? <div className={styles.motionNotice} role="alert" aria-live="assertive"><span>!</span><p><strong>{isJapanese ? (motionStatus === "still" ? "長時間の停止を確認してください" : "注意：動きの状態を確認してください") : (motionStatus === "still" ? "장시간 정지를 확인해 주세요" : "주의 알림: 움직임을 확인해 주세요")}</strong>{isJapanese ? (motionStatus === "still" ? "20秒以上同じ姿勢が続いています。無理のない範囲で姿勢を少し変えてみましょう。" : "10秒以上動きが少ない状態が続いています。姿勢を確認してみましょう。") : (motionStatus === "still" ? "20초 이상 같은 자세가 이어지고 있어요. 무리하지 않는 범위에서 자세를 조금 바꿔볼까요?" : "10초 이상 움직임이 적은 상태가 이어지고 있어요. 자세를 한 번 확인해볼까요?")}</p></div> : null}
 
       <div className={styles.patientLayout}>
         <section className={styles.conversationCard} aria-label="환자용 건강 대화">

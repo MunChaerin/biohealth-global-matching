@@ -7,6 +7,9 @@ import { createSoapDraft, getChatSessionId, type SoapDraft } from "../../lib/cha
 import type { ChatbotContext } from "../../lib/chatbot/types";
 import { defaultPersona, getPatientPersona, patientPersonas } from "../../lib/patient/personas";
 import { createConversationObservation } from "../../lib/chatbot/observation";
+import { createEasyExplanation } from "../../lib/care/easyExplanation";
+import type { MotionReport } from "../../lib/motion/types";
+import { useMotionTracking } from "../motion/useMotionTracking";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
@@ -42,14 +45,20 @@ export function ClinicianDashboard() {
   const [acknowledgedAlerts, setAcknowledgedAlerts] = useState<string[]>([]);
   const [conversation, setConversation] = useState<ChatbotContext["messages"]>([]);
   const [showConversation, setShowConversation] = useState(false);
+  const [motionReport, setMotionReport] = useState<MotionReport | null>(null);
+  const [motionTrackingEnabled, setMotionTrackingEnabled] = useState(false);
+  const { videoRef: motionVideoRef, loading: motionLoading } = useMotionTracking(selectedPersona.id, motionTrackingEnabled);
   const [observation, setObservation] = useState(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: "", patientId: "" }));
   const planEditedRef = useRef(false);
   const explanationSentRef = useRef(false);
+  const explanationEditedRef = useRef(false);
 
   useEffect(() => {
     planEditedRef.current = false;
     explanationSentRef.current = false;
+    explanationEditedRef.current = false;
     setExplanationSent(false);
+    setExplanation(createEasyExplanation(selectedPersona, emptySoap));
     const update = async () => {
       try {
         const response = await fetch(`/api/chat/session?sessionId=${getChatSessionId(selectedPersona.id)}`, { cache: "no-store" });
@@ -61,7 +70,7 @@ export function ClinicianDashboard() {
         setObservation(createConversationObservation(payload.context));
         setConversation(payload.context.messages);
         if (!planEditedRef.current) setPlan(next.plan);
-        if (!explanationSentRef.current) setExplanation(next.assessment);
+        if (!explanationSentRef.current && !explanationEditedRef.current) setExplanation(createEasyExplanation(selectedPersona, next));
       } catch {
         // 의료진 화면은 마지막 정상 초안을 유지한다.
       }
@@ -71,6 +80,22 @@ export function ClinicianDashboard() {
     return () => {
       window.clearInterval(interval);
     };
+  }, [selectedPersona.id]);
+
+  useEffect(() => {
+    const updateMotion = async () => {
+      try {
+        const response = await fetch(`/api/motion?patientId=${selectedPersona.id}&t=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { report?: MotionReport | null };
+        setMotionReport(payload.report ?? null);
+      } catch {
+        // 모션 상태 조회 실패가 의료진 화면 전체를 막지 않도록 한다.
+      }
+    };
+    void updateMotion();
+    const interval = window.setInterval(updateMotion, 1500);
+    return () => window.clearInterval(interval);
   }, [selectedPersona.id]);
 
   useEffect(() => {
@@ -130,7 +155,8 @@ export function ClinicianDashboard() {
   }
 
 
-  const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length;
+  const motionAlertActive = motionReport?.status === "lowMovement" || motionReport?.status === "still";
+  const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length + (motionAlertActive && !acknowledgedAlerts.includes("motion") ? 1 : 0);
 
   return (
     <main className={styles.page}>
@@ -153,8 +179,10 @@ export function ClinicianDashboard() {
           <span className={styles.patientAvatar}>정</span>
           <div><p>담당 환자 · 실시간 요약</p><h1>{selectedPersona.name} <small>{selectedPersona.age}세</small></h1><span>{selectedPersona.room} · {selectedPersona.diagnosis}</span></div>
         </div>
-        <button className={styles.roundButton} type="button">오늘 회진</button>
+          <div className={styles.headerLinks}><button className={styles.motionLink} type="button" onClick={() => setMotionTrackingEnabled((value) => !value)}>{motionLoading ? "모션 트래킹 시작 중" : motionTrackingEnabled ? "모션 트래킹 중지" : "모션 트래킹 시작"}</button><button className={styles.roundButton} type="button">오늘 회진</button></div>
       </section>
+
+      <video ref={motionVideoRef} className={styles.motionVideo} muted playsInline autoPlay aria-hidden="true" />
 
       <div className={styles.notice}>
         <span>i</span><p><strong>의료진 검토 모드</strong> · 아래 내용은 대화와 센서 정보를 정리한 참고 자료입니다. 진단·처방을 자동으로 수행하지 않습니다.</p>
@@ -163,6 +191,7 @@ export function ClinicianDashboard() {
       <section className={styles.prioritySection}>
         <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><button className={styles.recordToggle} type="button" onClick={() => setShowRecords((value) => !value)}>확인할 기록 {visiblePriorityCount}건 {showRecords ? "⌃" : "›"}</button></div>
         <div className={styles.priorityGrid}>
+          {motionAlertActive && !acknowledgedAlerts.includes("motion") ? <article className={`${styles.priorityCard} ${styles.alert}`}><span className={styles.priorityIcon}>!</span><div><strong>{motionReport?.status === "still" ? "장시간 정지" : "주의 알림"}</strong><p>{motionReport?.status === "still" ? "20초 이상 움직임이 거의 없습니다." : "10초 이상 움직임이 적습니다."}</p><button type="button" onClick={() => acknowledgeAlert("motion")}>확인</button></div><time>{motionReport?.measuredAt ? new Date(motionReport.measuredAt).toLocaleTimeString("ko-KR") : "현재"}</time></article> : null}
           {priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.id}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p><button type="button" className={styles.alertConfirm} onClick={() => acknowledgeAlert(item.id)}>확인</button></div><time>{item.time}</time></article>)}
         </div>
         {showRecords ? <div className={styles.recordDetails} role="region" aria-label="확인할 기록 상세"><button type="button" onClick={() => document.querySelector("." + styles.panel)?.scrollIntoView({ behavior: "smooth" })}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => document.querySelector("." + styles.soap)?.scrollIntoView({ behavior: "smooth" })}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button></div> : null}
@@ -203,7 +232,7 @@ export function ClinicianDashboard() {
         </div>
       </section>
 
-      <section className={styles.handoff}><div><p>TWO-WAY COMMUNICATION</p><h2>환자에게는 더 쉬운 말로</h2><span>SOAP 초안을 참고해 의료진이 수정한 설명을 환자 화면에 전달합니다.</span></div><div className={styles.preview}><small>환자용 미리보기</small><textarea value={explanation} onChange={(event) => { setExplanationSent(false); setExplanation(event.target.value); }} aria-label="환자에게 전달할 쉬운 설명" /><button type="button" onClick={() => void sendExplanation()}>{explanationSent ? "전달 완료 ✓" : "쉬운 설명 전달하기 ›"}</button></div></section>
+      <section className={styles.handoff}><div><p>TWO-WAY COMMUNICATION</p><h2>환자에게는 더 쉬운 말로</h2><span>SOAP 초안을 바탕으로 설명 초안을 자동 생성했습니다. 의료진이 검토·수정한 뒤 환자에게 전달합니다.</span></div><div className={styles.preview}><small>환자용 미리보기 · 자동 생성 초안</small><textarea value={explanation} onChange={(event) => { explanationEditedRef.current = true; setExplanationSent(false); setExplanation(event.target.value); }} aria-label="환자에게 전달할 쉬운 설명" /><button type="button" onClick={() => void sendExplanation()}>{explanationSent ? "전달 완료 ✓" : "쉬운 설명 전달하기 ›"}</button></div></section>
       {callStatus === "requested" ? <div className={styles.callModalBackdrop} role="presentation"><section className={styles.callModal} role="alertdialog" aria-modal="true" aria-labelledby="call-modal-title"><span className={styles.callModalIcon}>!</span><div><p>CARE ALERT</p><h2 id="call-modal-title">환자가 의료진을 호출했습니다</h2><span>환자 화면의 도움 요청을 확인해 주세요.</span></div><button type="button" onClick={() => void acknowledgeCall()}>확인 처리</button></section></div> : null}
     </main>
   );
