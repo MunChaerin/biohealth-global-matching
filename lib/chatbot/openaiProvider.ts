@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { validateChatbotTurnOutput } from "./schemas";
 import type {
+  ChatLanguage,
   ChatbotContext,
   ChatbotProvider,
   ChatbotTurnInput,
@@ -121,6 +122,11 @@ const systemInstructions = `
 9. 예: 환자가 "허리 아파"라고 답하면 chiefConcern에 기록하고 "허리가 불편하시군요. 어느 부위가 가장 아픈가요?"처럼 다음 질문을 한다.
 `;
 
+const languageInstructions: Record<ChatLanguage, string> = {
+  ko: "환자에게 보여줄 문장과 음성 문장은 쉽고 짧은 한국어로 작성한다.",
+  ja: "患者に表示する文と音声文は、やさしく短い日本語で作成する。医療用語は避ける。",
+};
+
 const questionByTarget: Record<string, string> = {
   identity: "본인이 맞는지 확인해도 될까요?",
   consent: "현재 상태에 대해 몇 가지 질문을 드려도 될까요?",
@@ -164,6 +170,7 @@ function buildInput(input: ChatbotTurnInput): string {
       safetyFlags: context.safetyFlags,
       recentMessages: context.messages.slice(-8),
       patientText: input.patientText,
+      language: context.language ?? "ko",
     },
     null,
     2,
@@ -186,7 +193,7 @@ export class OpenAiChatbotProvider implements ChatbotProvider {
   async runTurn(input: ChatbotTurnInput): Promise<ChatbotTurnOutput> {
     const response = await this.client.responses.create({
       model: this.model,
-      instructions: systemInstructions,
+      instructions: `${systemInstructions}\n\n현재 응답 언어 규칙: ${languageInstructions[input.context.language ?? "ko"]}`,
       input: buildInput(input),
       text: {
         format: {

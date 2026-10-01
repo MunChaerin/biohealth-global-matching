@@ -12,6 +12,7 @@ interface ChatInputProps {
   speechError: string | null;
   onStartListening: (onTranscript: (text: string) => void) => void;
   onStopListening: () => void;
+  placeholder?: string;
 }
 
 export function ChatInput({
@@ -23,6 +24,7 @@ export function ChatInput({
   speechError,
   onStartListening,
   onStopListening,
+  placeholder = "불편한 점을 편하게 말씀해 주세요.",
 }: ChatInputProps) {
   const [text, setText] = useState("");
 
@@ -57,7 +59,7 @@ export function ChatInput({
         value={text}
         onChange={(event) => setText(event.target.value)}
         onKeyDown={handleKeyDown}
-        placeholder={disabled ? "의료진 연결 안내를 확인해 주세요." : "불편한 점을 편하게 말씀해 주세요."}
+        placeholder={disabled ? "의료진 연결 안내를 확인해 주세요." : placeholder}
         rows={2}
         disabled={disabled || isLoading}
       />

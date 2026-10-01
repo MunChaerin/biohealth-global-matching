@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import type {
+  ChatLanguage,
   ChatbotContext,
   ChatbotTurnOutput,
   ChatMessage,
@@ -35,6 +36,7 @@ export function usePatientChat() {
     messages: [message("assistant", firstQuestion)],
     subjective: {},
     safetyFlags: [],
+    language: "ko",
   });
   const contextRef = useRef(context);
   const requestInFlight = useRef(false);
@@ -47,8 +49,17 @@ export function usePatientChat() {
     setContext(next);
   }
 
+  function setLanguage(language: ChatLanguage) {
+    commit({ ...contextRef.current, language });
+  }
+
+  function finishSession() {
+    commit({ ...contextRef.current, state: "READY_FOR_SOAP" });
+    setSessionAction("complete");
+  }
+
   async function sendMessage(patientText: string): Promise<ChatbotTurnOutput | undefined> {
-    if (requestInFlight.current || sessionAction === "handoff" || contextRef.current.state === "SAFETY_HOLD") return;
+    if (requestInFlight.current || sessionAction === "handoff" || sessionAction === "complete" || contextRef.current.state === "SAFETY_HOLD" || contextRef.current.state === "READY_FOR_SOAP") return;
 
     requestInFlight.current = true;
     setIsLoading(true);
@@ -97,5 +108,6 @@ export function usePatientChat() {
 
   const safetyHold = context.state === "SAFETY_HOLD" || sessionAction === "handoff" || context.safetyFlags.length > 0;
 
-  return { context, error, isLoading, safetyHold, sendMessage };
+  const isComplete = sessionAction === "complete" || context.state === "READY_FOR_SOAP";
+  return { context, error, isLoading, safetyHold, isComplete, finishSession, setLanguage, sendMessage };
 }
