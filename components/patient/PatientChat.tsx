@@ -31,6 +31,7 @@ export function PatientChat() {
   const endRef = useRef<HTMLDivElement>(null);
   const [callStatus, setCallStatus] = useState<"requested" | "acknowledged" | null>(null);
   const [callAcknowledged, setCallAcknowledged] = useState(false);
+  const [largeText, setLargeText] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [medicationTaken, setMedicationTaken] = useState(false);
   const language = context.language ?? "ko";
@@ -82,7 +83,7 @@ export function PatientChat() {
   }
 
   return (
-    <main className={styles.pageShell}>
+    <main className={`${styles.pageShell} ${largeText ? styles.largeText : ""}`}>
       <header className={styles.siteHeader}>
         <Link className={styles.brand} href="/patient"><span className={styles.brandMark}>C</span><span><strong>CareLink</strong><small>돌봄을 더 가까이</small></span></Link>
         <nav className={styles.roleNav} aria-label="역할 화면 전환"><Link className={styles.roleActive} href="/patient">{copy.patient}</Link><Link href="/clinician">{copy.clinician}</Link></nav>
@@ -91,7 +92,7 @@ export function PatientChat() {
 
       <section className={styles.patientWelcome}>
         <div><p className={styles.sectionKicker}>{copy.kicker}</p><h1>{copy.title}</h1><p>{copy.subtitle}</p></div>
-        <div className={styles.patientTools}><div className={styles.languageSwitch} aria-label="언어 선택"><span>{copy.language}</span><button type="button" className={language === "ko" ? styles.selectedLanguage : ""} onClick={() => setLanguage("ko" as ChatLanguage)} aria-pressed={language === "ko"}>한국어</button><button type="button" className={language === "ja" ? styles.selectedLanguage : ""} onClick={() => setLanguage("ja" as ChatLanguage)} aria-pressed={language === "ja"}>日本語</button></div><button type="button">{copy.enlarge}</button></div>
+        <div className={styles.patientTools}><div className={styles.languageSwitch} aria-label="언어 선택"><span>{copy.language}</span><button type="button" className={language === "ko" ? styles.selectedLanguage : ""} onClick={() => setLanguage("ko" as ChatLanguage)} aria-pressed={language === "ko"}>한국어</button><button type="button" className={language === "ja" ? styles.selectedLanguage : ""} onClick={() => setLanguage("ja" as ChatLanguage)} aria-pressed={language === "ja"}>日本語</button></div><button type="button" onClick={() => setLargeText((value) => !value)} aria-pressed={largeText}>{largeText ? (isJapanese ? "文字を戻す" : "글자 작게") : copy.enlarge}</button></div>
       </section>
 
       <div className={styles.notice}><span>i</span><p>{copy.notice}</p></div>
