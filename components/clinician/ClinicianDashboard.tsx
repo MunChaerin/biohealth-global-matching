@@ -7,6 +7,7 @@ import { createSoapDraft, getChatSessionId, type SoapDraft } from "../../lib/cha
 import type { ChatbotContext } from "../../lib/chatbot/types";
 import { defaultPersona, getPatientPersona, patientPersonas } from "../../lib/patient/personas";
 import { createConversationObservation } from "../../lib/chatbot/observation";
+import type { MotionReport } from "../../lib/motion/types";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
@@ -42,6 +43,7 @@ export function ClinicianDashboard() {
   const [acknowledgedAlerts, setAcknowledgedAlerts] = useState<string[]>([]);
   const [conversation, setConversation] = useState<ChatbotContext["messages"]>([]);
   const [showConversation, setShowConversation] = useState(false);
+  const [motionReport, setMotionReport] = useState<MotionReport | null>(null);
   const [observation, setObservation] = useState(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: "", patientId: "" }));
   const planEditedRef = useRef(false);
   const explanationSentRef = useRef(false);
@@ -71,6 +73,22 @@ export function ClinicianDashboard() {
     return () => {
       window.clearInterval(interval);
     };
+  }, [selectedPersona.id]);
+
+  useEffect(() => {
+    const updateMotion = async () => {
+      try {
+        const response = await fetch(`/api/motion?patientId=${selectedPersona.id}&t=${Date.now()}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { report?: MotionReport | null };
+        setMotionReport(payload.report ?? null);
+      } catch {
+        // 모션 상태 조회 실패가 의료진 화면 전체를 막지 않도록 한다.
+      }
+    };
+    void updateMotion();
+    const interval = window.setInterval(updateMotion, 1500);
+    return () => window.clearInterval(interval);
   }, [selectedPersona.id]);
 
   useEffect(() => {
@@ -130,7 +148,8 @@ export function ClinicianDashboard() {
   }
 
 
-  const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length;
+  const motionAlertActive = motionReport?.status === "lowMovement" || motionReport?.status === "still";
+  const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length + (motionAlertActive && !acknowledgedAlerts.includes("motion") ? 1 : 0);
 
   return (
     <main className={styles.page}>
@@ -153,7 +172,7 @@ export function ClinicianDashboard() {
           <span className={styles.patientAvatar}>정</span>
           <div><p>담당 환자 · 실시간 요약</p><h1>{selectedPersona.name} <small>{selectedPersona.age}세</small></h1><span>{selectedPersona.room} · {selectedPersona.diagnosis}</span></div>
         </div>
-        <button className={styles.roundButton} type="button">오늘 회진</button>
+          <div className={styles.headerLinks}><Link className={styles.motionLink} href={`/motiontracking?patientId=${selectedPersona.id}`}>모션 트래킹</Link><button className={styles.roundButton} type="button">오늘 회진</button></div>
       </section>
 
       <div className={styles.notice}>
@@ -163,6 +182,7 @@ export function ClinicianDashboard() {
       <section className={styles.prioritySection}>
         <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><button className={styles.recordToggle} type="button" onClick={() => setShowRecords((value) => !value)}>확인할 기록 {visiblePriorityCount}건 {showRecords ? "⌃" : "›"}</button></div>
         <div className={styles.priorityGrid}>
+          {motionAlertActive && !acknowledgedAlerts.includes("motion") ? <article className={`${styles.priorityCard} ${styles.alert}`}><span className={styles.priorityIcon}>!</span><div><strong>{motionReport?.status === "still" ? "장시간 움직임 없음" : "움직임 감소"}</strong><p>{motionReport?.status === "still" ? "10분 이상 움직임이 거의 없습니다." : "5분 이상 움직임이 적습니다."}</p><button type="button" onClick={() => acknowledgeAlert("motion")}>확인</button></div><time>{motionReport?.measuredAt ? new Date(motionReport.measuredAt).toLocaleTimeString("ko-KR") : "현재"}</time></article> : null}
           {priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.id}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p><button type="button" className={styles.alertConfirm} onClick={() => acknowledgeAlert(item.id)}>확인</button></div><time>{item.time}</time></article>)}
         </div>
         {showRecords ? <div className={styles.recordDetails} role="region" aria-label="확인할 기록 상세"><button type="button" onClick={() => document.querySelector("." + styles.panel)?.scrollIntoView({ behavior: "smooth" })}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => document.querySelector("." + styles.soap)?.scrollIntoView({ behavior: "smooth" })}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button></div> : null}
