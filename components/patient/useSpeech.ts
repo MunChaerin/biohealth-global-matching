@@ -38,7 +38,7 @@ function recognitionErrorMessage(error: string): string {
   return "음성 입력을 시작하지 못했어요. 직접 입력해 주세요.";
 }
 
-export function useSpeech() {
+export function useSpeech(language: "ko" | "ja" = "ko") {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const transcriptHandlerRef = useRef<(text: string) => void>(() => undefined);
   const [isListening, setIsListening] = useState(false);
@@ -73,7 +73,7 @@ export function useSpeech() {
     transcriptHandlerRef.current = onTranscript;
     setSpeechError(null);
     const recognition = new Recognition();
-    recognition.lang = "ko-KR";
+    recognition.lang = language === "ja" ? "ja-JP" : "ko-KR";
     recognition.continuous = false;
     recognition.interimResults = false;
     recognition.onresult = (event) => {
@@ -95,7 +95,7 @@ export function useSpeech() {
       setIsListening(false);
       setSpeechError("음성 입력을 시작하지 못했어요. 직접 입력해 주세요.");
     }
-  }, []);
+  }, [language]);
 
   const stopSpeaking = useCallback(() => {
     window.speechSynthesis?.cancel();
@@ -107,13 +107,13 @@ export function useSpeech() {
 
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = "ko-KR";
+    utterance.lang = language === "ja" ? "ja-JP" : "ko-KR";
     utterance.rate = 0.95;
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
     window.speechSynthesis.speak(utterance);
-  }, []);
+  }, [language]);
 
   return {
     isListening,

@@ -11,6 +11,7 @@ import type {
 } from "../../lib/chatbot/types";
 
 const firstQuestion = "오늘 가장 불편한 점은 무엇인가요?";
+const firstQuestionJapanese = "今日、いちばんつらいことは何ですか？";
 
 function createId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -50,7 +51,16 @@ export function usePatientChat() {
   }
 
   function setLanguage(language: ChatLanguage) {
-    commit({ ...contextRef.current, language });
+    const current = contextRef.current;
+    const firstMessage = current.messages[0];
+    const isInitialQuestion = firstMessage?.role === "assistant" && (firstMessage.text === firstQuestion || firstMessage.text === firstQuestionJapanese);
+    commit({
+      ...current,
+      language,
+      messages: isInitialQuestion
+        ? [{ ...firstMessage, text: language === "ja" ? firstQuestionJapanese : firstQuestion }, ...current.messages.slice(1)]
+        : current.messages,
+    });
   }
 
   function finishSession() {

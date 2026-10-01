@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent, type KeyboardEvent } from "react";
+import type { ChatLanguage } from "../../lib/chatbot/types";
 import styles from "./patient-chat.module.css";
 
 interface ChatInputProps {
@@ -15,6 +16,7 @@ interface ChatInputProps {
   placeholder?: string;
   onFinish?: () => void;
   finishDisabled?: boolean;
+  language?: ChatLanguage;
 }
 
 export function ChatInput({
@@ -29,6 +31,7 @@ export function ChatInput({
   placeholder = "불편한 점을 편하게 말씀해 주세요.",
   onFinish,
   finishDisabled = false,
+  language = "ko",
 }: ChatInputProps) {
   const [text, setText] = useState("");
 
@@ -79,12 +82,12 @@ export function ChatInput({
               ? onStopListening()
               : onStartListening((transcript) => setText((current) => `${current}${current ? " " : ""}${transcript}`))}
           >
-            {isListening ? "듣기 중지" : "말하기"}
+          {isListening ? (language === "ja" ? "停止" : "듣기 중지") : (language === "ja" ? "話す" : "말하기")}
           </button>
           <button className={styles.sendButton} type="submit" disabled={disabled || isLoading || text.trim().length === 0}>
-            {isLoading ? "전송 중" : "보내기"}
+            {isLoading ? (language === "ja" ? "送信中" : "전송 중") : (language === "ja" ? "送信" : "보내기")}
           </button>
-          {onFinish ? <button className={styles.finishButton} type="button" onClick={onFinish} disabled={disabled || isLoading || finishDisabled}>대화 마치기</button> : null}
+          {onFinish ? <button className={styles.finishButton} type="button" onClick={onFinish} disabled={disabled || isLoading || finishDisabled}>{language === "ja" ? "終了" : "대화 마치기"}</button> : null}
         </div>
       </div>
       {speechError ? <p className={styles.speechStatus} role="status">{speechError}</p> : null}
