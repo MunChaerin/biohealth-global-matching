@@ -77,7 +77,10 @@ export function ClinicianDashboard() {
         if (raw) {
           const localCall = JSON.parse(raw) as { patientId?: string; status?: "requested" | "acknowledged" };
           localRequested = localCall.patientId === selectedPersona.id && localCall.status === "requested";
-          if (localRequested) setCallStatus("requested");
+          if (localRequested) {
+            setCallStatus("requested");
+            setAcknowledgedAlerts((current) => current.filter((id) => id !== "call"));
+          }
         }
       } catch { /* 서버 상태를 사용 */ }
       try {
@@ -85,6 +88,7 @@ export function ClinicianDashboard() {
         if (response.ok) {
           const serverStatus = ((await response.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null;
           setCallStatus(serverStatus ?? (localRequested ? "requested" : null));
+          if (serverStatus === "requested") setAcknowledgedAlerts((current) => current.filter((id) => id !== "call"));
         }
       } catch {
         if (localRequested) setCallStatus("requested");
@@ -122,7 +126,7 @@ export function ClinicianDashboard() {
   }
 
 
-  const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length + (callStatus === "requested" && !acknowledgedAlerts.includes("call") ? 1 : 0);
+  const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length;
 
   return (
     <main className={styles.page}>
@@ -155,10 +159,9 @@ export function ClinicianDashboard() {
       <section className={styles.prioritySection}>
         <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><button className={styles.recordToggle} type="button" onClick={() => setShowRecords((value) => !value)}>확인할 기록 {visiblePriorityCount}건 {showRecords ? "⌃" : "›"}</button></div>
         <div className={styles.priorityGrid}>
-          {callStatus === "requested" && !acknowledgedAlerts.includes("call") ? <article className={`${styles.priorityCard} ${styles.alert}`}><span className={styles.priorityIcon}>!</span><div><strong>환자가 의료진을 호출했습니다</strong><p>환자 화면의 도움 요청을 확인해 주세요.</p><button type="button" onClick={() => { acknowledgeAlert("call"); void acknowledgeCall(); }}>확인 처리</button></div><time>지금</time></article> : null}
           {priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.id}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p><button type="button" className={styles.alertConfirm} onClick={() => acknowledgeAlert(item.id)}>확인</button></div><time>{item.time}</time></article>)}
         </div>
-        {showRecords ? <div className={styles.recordDetails} role="region" aria-label="확인할 기록 상세"><button type="button" onClick={() => document.querySelector("." + styles.panel)?.scrollIntoView({ behavior: "smooth" })}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => document.querySelector("." + styles.soap)?.scrollIntoView({ behavior: "smooth" })}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button>{callStatus === "requested" ? <button type="button" onClick={() => { acknowledgeAlert("call"); void acknowledgeCall(); }}><b>의료진 호출</b><span>환자의 도움 요청을 확인 처리합니다. ›</span></button> : null}</div> : null}
+        {showRecords ? <div className={styles.recordDetails} role="region" aria-label="확인할 기록 상세"><button type="button" onClick={() => document.querySelector("." + styles.panel)?.scrollIntoView({ behavior: "smooth" })}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => document.querySelector("." + styles.soap)?.scrollIntoView({ behavior: "smooth" })}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button></div> : null}
       </section>
 
       <section className={styles.dashboardGrid}>
@@ -197,7 +200,7 @@ export function ClinicianDashboard() {
       </section>
 
       <section className={styles.handoff}><div><p>TWO-WAY COMMUNICATION</p><h2>환자에게는 더 쉬운 말로</h2><span>SOAP 초안을 참고해 의료진이 수정한 설명을 환자 화면에 전달합니다.</span></div><div className={styles.preview}><small>환자용 미리보기</small><textarea value={explanation} onChange={(event) => { setExplanationSent(false); setExplanation(event.target.value); }} aria-label="환자에게 전달할 쉬운 설명" /><button type="button" onClick={() => void sendExplanation()}>{explanationSent ? "전달 완료 ✓" : "쉬운 설명 전달하기 ›"}</button></div></section>
-      {callStatus === "requested" && !acknowledgedAlerts.includes("call") ? <div className={styles.callModalBackdrop} role="presentation"><section className={styles.callModal} role="alertdialog" aria-modal="true" aria-labelledby="call-modal-title"><span className={styles.callModalIcon}>!</span><div><p>CARE ALERT</p><h2 id="call-modal-title">환자가 의료진을 호출했습니다</h2><span>환자 화면의 도움 요청을 확인해 주세요.</span></div><button type="button" onClick={() => { acknowledgeAlert("call"); void acknowledgeCall(); }}>확인 처리</button></section></div> : null}
+      {callStatus === "requested" ? <div className={styles.callModalBackdrop} role="presentation"><section className={styles.callModal} role="alertdialog" aria-modal="true" aria-labelledby="call-modal-title"><span className={styles.callModalIcon}>!</span><div><p>CARE ALERT</p><h2 id="call-modal-title">환자가 의료진을 호출했습니다</h2><span>환자 화면의 도움 요청을 확인해 주세요.</span></div><button type="button" onClick={() => void acknowledgeCall()}>확인 처리</button></section></div> : null}
     </main>
   );
 }
