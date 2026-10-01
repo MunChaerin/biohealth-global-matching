@@ -172,7 +172,7 @@ export function ClinicianDashboard() {
           <span className={styles.patientAvatar}>정</span>
           <div><p>담당 환자 · 실시간 요약</p><h1>{selectedPersona.name} <small>{selectedPersona.age}세</small></h1><span>{selectedPersona.room} · {selectedPersona.diagnosis}</span></div>
         </div>
-          <div className={styles.headerLinks}><Link className={styles.motionLink} href={`/motiontracking?patientId=${selectedPersona.id}`}>모션 트래킹</Link><button className={styles.roundButton} type="button">오늘 회진</button></div>
+          <div className={styles.headerLinks}><Link className={styles.motionLink} href={`/motiontracking?patientId=${selectedPersona.id}`}>모션 트래킹 시작</Link><button className={styles.roundButton} type="button">오늘 회진</button></div>
       </section>
 
       <div className={styles.notice}>
