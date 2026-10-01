@@ -8,6 +8,7 @@ import type { ChatbotContext } from "../../lib/chatbot/types";
 import { defaultPersona, getPatientPersona, patientPersonas } from "../../lib/patient/personas";
 import { createConversationObservation } from "../../lib/chatbot/observation";
 import type { MotionReport } from "../../lib/motion/types";
+import { useMotionTracking } from "../motion/useMotionTracking";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
@@ -44,6 +45,8 @@ export function ClinicianDashboard() {
   const [conversation, setConversation] = useState<ChatbotContext["messages"]>([]);
   const [showConversation, setShowConversation] = useState(false);
   const [motionReport, setMotionReport] = useState<MotionReport | null>(null);
+  const [motionTrackingEnabled, setMotionTrackingEnabled] = useState(false);
+  const { videoRef: motionVideoRef, loading: motionLoading } = useMotionTracking(selectedPersona.id, motionTrackingEnabled);
   const [observation, setObservation] = useState(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: "", patientId: "" }));
   const planEditedRef = useRef(false);
   const explanationSentRef = useRef(false);
@@ -172,8 +175,10 @@ export function ClinicianDashboard() {
           <span className={styles.patientAvatar}>정</span>
           <div><p>담당 환자 · 실시간 요약</p><h1>{selectedPersona.name} <small>{selectedPersona.age}세</small></h1><span>{selectedPersona.room} · {selectedPersona.diagnosis}</span></div>
         </div>
-          <div className={styles.headerLinks}><Link className={styles.motionLink} href={`/motiontracking?patientId=${selectedPersona.id}`}>모션 트래킹 시작</Link><button className={styles.roundButton} type="button">오늘 회진</button></div>
+          <div className={styles.headerLinks}><button className={styles.motionLink} type="button" onClick={() => setMotionTrackingEnabled((value) => !value)}>{motionLoading ? "모션 트래킹 시작 중" : motionTrackingEnabled ? "모션 트래킹 중지" : "모션 트래킹 시작"}</button><button className={styles.roundButton} type="button">오늘 회진</button></div>
       </section>
+
+      <video ref={motionVideoRef} className={styles.motionVideo} muted playsInline autoPlay aria-hidden="true" />
 
       <div className={styles.notice}>
         <span>i</span><p><strong>의료진 검토 모드</strong> · 아래 내용은 대화와 센서 정보를 정리한 참고 자료입니다. 진단·처방을 자동으로 수행하지 않습니다.</p>
