@@ -1,5 +1,10 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { FacialObservation } from "./FacialObservation";
+import { CHAT_CONTEXT_STORAGE_KEY, createSoapDraft, type SoapDraft } from "../../lib/chatbot/soapDraft";
+import type { ChatbotContext } from "../../lib/chatbot/types";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
@@ -11,7 +16,48 @@ const days = [
   ["월", 58], ["화", 64], ["수", 48], ["목", 70], ["금", 66], ["토", 73], ["오늘", 61],
 ];
 
+const emptySoap: SoapDraft = {
+  subjective: "환자 대화 정보가 아직 수집되지 않았습니다.",
+  subjectiveMeta: "대화 0회",
+  objective: "카메라·센서·모션 데이터 연동 대기 중.",
+  objectiveMeta: "카메라 · 센서 · 모션 데이터",
+  assessment: "대화가 시작되면 참고 제안을 생성합니다.",
+  assessmentMeta: "대기 중",
+  plan: "의료진이 최종 계획을 입력합니다.",
+  planMeta: "의료진 최종 확정",
+  updatedAt: "",
+};
+
+function readSoapDraft(): SoapDraft {
+  try {
+    const raw = window.localStorage.getItem(CHAT_CONTEXT_STORAGE_KEY);
+    if (!raw) return emptySoap;
+    return createSoapDraft(JSON.parse(raw) as ChatbotContext);
+  } catch {
+    return emptySoap;
+  }
+}
+
 export function ClinicianDashboard() {
+  const [soap, setSoap] = useState<SoapDraft>(emptySoap);
+  const [plan, setPlan] = useState(emptySoap.plan);
+  const planEditedRef = useRef(false);
+
+  useEffect(() => {
+    const update = () => {
+      const next = readSoapDraft();
+      setSoap(next);
+      if (!planEditedRef.current) setPlan(next.plan);
+    };
+    update();
+    window.addEventListener("storage", update);
+    const interval = window.setInterval(update, 1000);
+    return () => {
+      window.removeEventListener("storage", update);
+      window.clearInterval(interval);
+    };
+  }, []);
+
   return (
     <main className={styles.page}>
       <header className={styles.topbar}>
@@ -66,12 +112,12 @@ export function ClinicianDashboard() {
       </section>
 
       <section className={styles.soap}>
-        <div className={styles.soapHeading}><div><p>MEDICAL REVIEW</p><h2>SOAP 보고서 초안</h2><span>대화, 생체신호, 모션 정보에 근거한 검토용 초안입니다.</span></div><button type="button">초안 저장</button></div>
+        <div className={styles.soapHeading}><div><p>MEDICAL REVIEW · LIVE</p><h2>SOAP 보고서 초안</h2><span>환자 챗봇 대화가 업데이트될 때마다 실시간으로 갱신되는 검토용 초안입니다.</span></div><button type="button">초안 저장</button></div>
         <div className={styles.soapGrid}>
-          <article className={styles.soapS}><b>S</b><div><h3>Subjective <small>대화 기반</small></h3><p>어젯밤 중간에 한 번 깼으나 다시 잠들었다고 말씀하심. 허리 부위 불편감은 4/10 정도이며, “창밖을 보니 기분이 조금 나아졌다”고 표현함.</p><span>대화 09:12–09:16 · 수면 · 통증 · 기분</span></div></article>
-          <article className={styles.soapO}><b>O</b><div><h3>Objective <small>센서 · 모션</small></h3><p>맥박 76 bpm, SpO₂ 97%로 안정 범위. 최근 2시간 6분 동안 동일 체위 유지. 표정과 대화에서 안정적인 표현이 주로 관찰됨.</p><span>SpO₂ 97% · 체위 2시간 6분</span></div></article>
-          <article className={styles.soapA}><b>A</b><div><h3>Assessment <small>참고 제안</small></h3><p>현재 활력징후는 안정적이나 수면 중 각성과 경도 요통이 있어 장시간 동일 체위에 대한 경과 관찰이 필요함.</p><span>근거 · 중간 각성 1회 · 요통 4/10</span></div></article>
-          <article className={styles.soapP}><b>P</b><div><h3>Plan <small>의료진 편집</small></h3><textarea defaultValue="체위 변경을 보조하고 허리 불편감 재확인. 점심 전 5분간 창가 대화 또는 음악 감상을 제안." aria-label="치료 계획 편집" /><span>의료진 최종 확정</span></div></article>
+          <article className={styles.soapS}><b>S</b><div><h3>Subjective <small>대화 기반</small></h3><p>{soap.subjective}</p><span>{soap.subjectiveMeta}</span></div></article>
+          <article className={styles.soapO}><b>O</b><div><h3>Objective <small>센서 · 모션</small></h3><p>{soap.objective}</p><span>{soap.objectiveMeta}</span></div></article>
+          <article className={styles.soapA}><b>A</b><div><h3>Assessment <small>참고 제안</small></h3><p>{soap.assessment}</p><span>{soap.assessmentMeta}</span></div></article>
+          <article className={styles.soapP}><b>P</b><div><h3>Plan <small>의료진 편집</small></h3><textarea value={plan} onChange={(event) => { planEditedRef.current = true; setPlan(event.target.value); }} aria-label="치료 계획 편집" /><span>{soap.planMeta}</span></div></article>
         </div>
       </section>
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatLanguage,
   ChatbotContext,
@@ -9,6 +9,7 @@ import type {
   SafetyFlag,
   SubjectiveData,
 } from "../../lib/chatbot/types";
+import { CHAT_CONTEXT_STORAGE_KEY } from "../../lib/chatbot/soapDraft";
 
 const firstQuestion = "오늘 가장 불편한 점은 무엇인가요?";
 const firstQuestionJapanese = "今日、いちばんつらいことは何ですか？";
@@ -44,6 +45,14 @@ export function usePatientChat() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionAction, setSessionAction] = useState<ChatbotTurnOutput["sessionAction"]>("continue");
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(CHAT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
+    } catch {
+      // 저장소를 사용할 수 없는 환경에서도 대화 자체는 계속한다.
+    }
+  }, [context]);
 
   function commit(next: ChatbotContext) {
     contextRef.current = next;
