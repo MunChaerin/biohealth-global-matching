@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { CameraIndicator } from "./CameraIndicator";
 import { ChatInput } from "./ChatInput";
 import { ChatMessage } from "./ChatMessage";
 import { SafetyNotice } from "./SafetyNotice";
@@ -59,6 +60,7 @@ export function PatientChat() {
         <aside className={styles.patientSide}>
           <section className={styles.moodCard}><div className={styles.cardHeading}><div><p>오늘의 대화 관찰</p><h2>편안한 표현이 많았어요</h2></div><span className={styles.moodFace}>☺</span></div><div className={styles.moodMeter}><span /><i /></div><div className={styles.moodLabels}><span>조금 지침</span><b>편안함</b></div><p className={styles.subtle}>최근 대화에서 관찰된 표현을 정리한 참고 정보예요.</p></section>
           <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>도움이 필요하세요?</p><small>담당 의료진에게 바로 알려드려요.</small></div><button type="button" className={isCalling ? styles.called : ""} onClick={() => setIsCalling(true)} disabled={isCalling}>{isCalling ? "요청을 알렸어요" : "의료진 부르기"}</button>{isCalling ? <small className={styles.callConfirm}>담당 의료진에게 도움 요청을 알렸어요.</small> : null}</section>
+          <CameraIndicator />
         </aside>
       </div>
 

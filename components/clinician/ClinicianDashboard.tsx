@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { FacialObservation } from "./FacialObservation";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
@@ -60,6 +61,7 @@ export function ClinicianDashboard() {
           <div className={styles.chart} aria-label="최근 7일 대화 관찰 기록">{days.map(([day, value]) => <div key={day as string}><i style={{ height: `${value}%` }} /><span>{day}</span></div>)}</div>
           <div className={styles.legend}><span><i /> 안정 <b>주요 표현</b></span><span><i /> 보통 <b>혼재</b></span><span><i /> 관찰 <b>확인 필요</b></span></div>
           <div className={styles.insight}>○ <span>오늘 아침 대화에서 “창밖을 보고 싶다”는 표현이 관찰되었습니다.</span></div>
+          <FacialObservation />
         </article>
       </section>
 
