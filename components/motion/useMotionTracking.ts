@@ -43,7 +43,25 @@ export function useMotionTracking(patientId: string, enabled = true, thresholds:
       const video = videoRef.current;
       const now = Date.now();
       if (video && landmarker && video.readyState >= 2) {
-        const landmarks = landmarker.detectForVideo(video, performance.now()).faceLandmarks[0];
+        let landmarks;
+        try {
+          // MediaPipe가 최초 추론 때 출력하는 XNNPACK INFO 로그가 Next 개발 오버레이에서
+          // Console Error로 표시되는 것을 막고, 실제 추론 오류는 아래 catch에서 처리한다.
+          const originalConsoleError = console.error;
+          console.error = (...args: unknown[]) => {
+            if (args.some((arg) => typeof arg === "string" && arg.includes("Created TensorFlow Lite XNNPACK delegate"))) return;
+            originalConsoleError(...args);
+          };
+          try {
+            landmarks = landmarker.detectForVideo(video, performance.now()).faceLandmarks[0];
+          } finally {
+            console.error = originalConsoleError;
+          }
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : "모션 분석 중 오류가 발생했습니다.");
+          timer = setTimeout(tick, 1000);
+          return;
+        }
         if (!landmarks) {
           absenceStartedAt ??= now;
           const absence = (now - absenceStartedAt) / 1000;
