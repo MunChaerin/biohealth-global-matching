@@ -36,3 +36,15 @@
 .facialRatio b { text-align: right; color: #476a72; }
 .facialNote { padding: 7px 9px; color: #8a5a22; background: #fdf3e6; border-radius: 7px; }
 .facialFoot { display: block; margin-top: 9px; color: #8ca1a7; font-size: 9px; }
+.medication { margin-top: 16px; padding: 21px; background: #fff; border: 1px solid #dceae6; border-radius: 19px; box-shadow: 0 5px 14px rgba(17,79,75,.03); }
+.medication h2 { margin: 0; font-size: 18px; letter-spacing: -1px; }
+.medicationList { display: grid; gap: 8px; margin: 14px 0 0; padding: 0; list-style: none; }
+.medicationList li { display: grid; grid-template-columns: 48px 1fr auto; align-items: center; gap: 10px; padding: 10px 12px; border: 1px solid #e3ecea; border-radius: 11px; font-size: 11px; color: #476a72; }
+.medicationList li div { display: flex; flex-direction: column; gap: 2px; }
+.medicationList b { color: #25474d; font-size: 12px; }
+.medicationList small { color: #8ca1a7; font-size: 10px; }
+.medTime { color: #0b6e72; font-family: monospace; font-size: 12px; font-weight: 700; }
+.medicationList em { padding: 4px 8px; border-radius: 100px; font-size: 10px; font-style: normal; font-weight: 700; }
+.medTaken em { color: #23865e; background: #e3f4ec; }
+.medPending em { color: #7c8f94; background: #eef2f2; }
+.medicationList .medMismatch { color: #a3551d; }
