@@ -41,6 +41,12 @@ export function PatientChat() {
     : { kicker: "오늘의 돌봄 대화", title: `${persona.name} 어르신, 좋은 아침이에요.`, subtitle: persona.greeting, notice: "한국어로 대화하고 있어요. 음성 입력도 사용할 수 있어요.", assistant: "마음 돌봄 친구", listening: "함께 듣고 있어요", quick: "지금 마음에 가까운 말을 골라 보세요.", soap: "SOAP 초안을 작성했어요", soapHelp: "의료진이 확인한 뒤 최종 판단합니다.", placeholder: "불편한 점을 편하게 말씀해 주세요.", patient: "환자 화면", clinician: "의료진 화면", review: "의료진 검토 보조", language: "언어 ·", enlarge: "글자 크게", voice: "◖ 음성으로 듣기", loading: "답변을 확인하고 있어요...", assist: "◌　발음이 불분명할 때는", stt: "STT 음성 입력 보조", assistEnd: "가 함께 작동해요.", moodLabel: "오늘의 대화 관찰", moodTitle: "대화 관찰을 준비하고 있어요", tired: "확인 중", calm: "참고", moodHint: `${persona.summary}. 대화와 센서 정보가 쌓이면 갱신됩니다.`, help: "도움이 필요하세요?", helpHint: "담당 의료진에게 바로 알려드려요.", call: "의료진 부르기", called: "요청을 알렸어요", callConfirm: "담당 의료진에게 도움 요청을 알렸어요.", medicine: "복용 약물", medicineName: persona.medications, medicineTime: `${persona.age}세 · ${persona.room}`, medicineHint: persona.symptoms, taken: "복용했어요", takenDone: "✓ 복용 확인", planLabel: "오늘의 설명", planTitle: "의료진이 쉽게 알려드려요", planText: `${persona.name} 어르신, 오늘 상태를 의료진이 확인하고 쉬운 설명으로 알려드릴게요.`, listen: "음성으로 듣기　›", soapLink: "의료진 화면에서 확인 ›", footer: "ⓘ 건강 상태 표시는 돌봄을 돕기 위한 참고 정보이며, 진단이나 응급 판단을 대신하지 않습니다." };
   const replies = isJapanese ? persona.japaneseQuickReplies : persona.quickReplies;
   const observation = createConversationObservation(context);
+  const localizedObservation = isJapanese
+    ? {
+        title: observation.title === "대화 관찰을 준비하고 있어요" ? "会話の観察を準備しています" : observation.title === "안정적인 표현이 늘고 있어요" ? "安心した表現が増えています" : observation.title === "불편감 표현을 확인해 주세요" ? "不快感の表現を確認してください" : "いくつかの表現が観察されています",
+        detail: observation.evidence === "환자 발화 없음" ? "会話が始まると観察内容を表示します。" : observation.detail.includes("불편감") ? "不快感や心配に関する表現がありました。" : "現在の会話では明らかな危険表現は確認されていません。",
+      }
+    : { title: observation.title, detail: observation.detail };
 
   useEffect(() => {
     const update = async () => {
@@ -112,8 +118,8 @@ export function PatientChat() {
         </section>
 
         <aside className={styles.patientSide}>
-          <section className={styles.moodCard}><div className={styles.cardHeading}><div><p>{copy.moodLabel}</p><h2>{isJapanese && observation.title === "안정적인 표현이 늘고 있어요" ? "安心した表現が増えています" : observation.title}</h2></div><span className={styles.moodFace}>☺</span></div><div className={styles.moodMeter}><span style={{ width: `${observation.score}%` }} /><i /></div><div className={styles.moodLabels}><span>{copy.tired}</span><b>{copy.calm}</b></div><p className={styles.subtle}>{observation.detail}</p></section>
-          <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>{copy.help}</p><small>{callStatus ? copy.callConfirm : callAcknowledged ? "의료진이 확인했어요. 다시 도움이 필요하면 눌러 주세요." : copy.helpHint}</small></div><button type="button" className={callStatus ? styles.called : ""} onClick={() => void callClinician()} disabled={callStatus === "requested"}>{callStatus ? copy.called : copy.call}</button>{callAcknowledged ? <small className={styles.callConfirm}>의료진이 확인했어요. 버튼을 다시 사용할 수 있어요.</small> : null}</section>
+          <section className={styles.moodCard}><div className={styles.cardHeading}><div><p>{copy.moodLabel}</p><h2>{localizedObservation.title}</h2></div><span className={styles.moodFace}>☺</span></div><div className={styles.moodMeter}><span style={{ width: `${observation.score}%` }} /><i /></div><div className={styles.moodLabels}><span>{copy.tired}</span><b>{copy.calm}</b></div><p className={styles.subtle}>{localizedObservation.detail}</p></section>
+          <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>{copy.help}</p><small>{callStatus ? copy.callConfirm : callAcknowledged ? (isJapanese ? "医療スタッフが確認しました。もう一度必要なときは押してください。" : "의료진이 확인했어요. 다시 도움이 필요하면 눌러 주세요.") : copy.helpHint}</small></div><button type="button" className={callStatus ? styles.called : ""} onClick={() => void callClinician()} disabled={callStatus === "requested"}>{callStatus ? copy.called : copy.call}</button>{callAcknowledged ? <small className={styles.callConfirm}>{isJapanese ? "医療スタッフが確認しました。ボタンをもう一度使えます。" : "의료진이 확인했어요. 버튼을 다시 사용할 수 있어요."}</small> : null}</section>
           <CameraIndicator language={language} patientId={persona.id} speechAssistActive={speech.isListening} />
         </aside>
       </div>
