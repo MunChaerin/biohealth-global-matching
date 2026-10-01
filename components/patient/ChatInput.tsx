@@ -68,7 +68,7 @@ export function ChatInput({
           value={text}
           onChange={(event) => setText(event.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={disabled ? "의료진 연결 안내를 확인해 주세요." : placeholder}
+          placeholder={disabled ? (language === "ja" ? "医療スタッフからの案内を確認してください。" : "의료진 연결 안내를 확인해 주세요.") : placeholder}
           rows={2}
           disabled={disabled || isLoading}
         />

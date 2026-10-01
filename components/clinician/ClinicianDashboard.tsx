@@ -3,13 +3,15 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { FacialObservation } from "./FacialObservation";
-import { createSoapDraft, DEMO_CHAT_SESSION_ID, type SoapDraft } from "../../lib/chatbot/soapDraft";
+import { createSoapDraft, getChatSessionId, type SoapDraft } from "../../lib/chatbot/soapDraft";
 import type { ChatbotContext } from "../../lib/chatbot/types";
+import { defaultPersona, getPatientPersona, patientPersonas } from "../../lib/patient/personas";
+import { createConversationObservation } from "../../lib/chatbot/observation";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
-  { tone: "observe", label: "체위 변경 권장", detail: "동일 체위 유지 시간이 2시간을 넘었습니다.", time: "09:05" },
-  { tone: "soft", label: "수면 경과 확인", detail: "지난밤 중간 각성 1회가 기록되었습니다.", time: "09:13" },
+  { id: "position", tone: "observe", label: "체위 변경 권장", detail: "동일 체위 유지 시간이 2시간을 넘었습니다.", time: "09:05" },
+  { id: "sleep", tone: "soft", label: "수면 경과 확인", detail: "지난밤 중간 각성 1회가 기록되었습니다.", time: "09:13" },
 ];
 
 const days = [
@@ -19,8 +21,8 @@ const days = [
 const emptySoap: SoapDraft = {
   subjective: "환자 대화 정보가 아직 수집되지 않았습니다.",
   subjectiveMeta: "대화 0회",
-  objective: "현재 실제 카메라·센서·모션 값은 아직 연결되지 않았습니다.",
-  objectiveMeta: "O 데이터 소스 연동 대기",
+  objective: "환자 대화가 시작되면 환자 시나리오 기반 참고값과 카메라 관찰을 표시합니다.",
+  objectiveMeta: "시나리오 참고값 · 실제 센서 연동 전",
   assessment: "대화가 시작되면 참고 제안을 생성합니다.",
   assessmentMeta: "대기 중",
   plan: "의료진이 최종 계획을 입력합니다.",
@@ -29,20 +31,37 @@ const emptySoap: SoapDraft = {
 };
 
 export function ClinicianDashboard() {
+  const [selectedPersonaId, setSelectedPersonaId] = useState(defaultPersona.id);
+  const selectedPersona = getPatientPersona(selectedPersonaId);
   const [soap, setSoap] = useState<SoapDraft>(emptySoap);
   const [plan, setPlan] = useState(emptySoap.plan);
+  const [callStatus, setCallStatus] = useState<"requested" | "acknowledged" | null>(null);
+  const [explanation, setExplanation] = useState("");
+  const [explanationSent, setExplanationSent] = useState(false);
+  const [showRecords, setShowRecords] = useState(false);
+  const [acknowledgedAlerts, setAcknowledgedAlerts] = useState<string[]>([]);
+  const [conversation, setConversation] = useState<ChatbotContext["messages"]>([]);
+  const [showConversation, setShowConversation] = useState(false);
+  const [observation, setObservation] = useState(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: "", patientId: "" }));
   const planEditedRef = useRef(false);
+  const explanationSentRef = useRef(false);
 
   useEffect(() => {
+    planEditedRef.current = false;
+    explanationSentRef.current = false;
+    setExplanationSent(false);
     const update = async () => {
       try {
-        const response = await fetch(`/api/chat/session?sessionId=${DEMO_CHAT_SESSION_ID}`, { cache: "no-store" });
+        const response = await fetch(`/api/chat/session?sessionId=${getChatSessionId(selectedPersona.id)}`, { cache: "no-store" });
         if (!response.ok) return;
         const payload = (await response.json()) as { context?: ChatbotContext | null };
         if (!payload.context) return;
         const next = createSoapDraft(payload.context);
         setSoap(next);
+        setObservation(createConversationObservation(payload.context));
+        setConversation(payload.context.messages);
         if (!planEditedRef.current) setPlan(next.plan);
+        if (!explanationSentRef.current) setExplanation(next.assessment);
       } catch {
         // 의료진 화면은 마지막 정상 초안을 유지한다.
       }
@@ -52,7 +71,66 @@ export function ClinicianDashboard() {
     return () => {
       window.clearInterval(interval);
     };
-  }, []);
+  }, [selectedPersona.id]);
+
+  useEffect(() => {
+    const updateCall = async () => {
+      let localRequested = false;
+      try {
+        const raw = window.localStorage.getItem("carelink.careCall");
+        if (raw) {
+          const localCall = JSON.parse(raw) as { patientId?: string; status?: "requested" | "acknowledged" };
+          localRequested = localCall.patientId === selectedPersona.id && localCall.status === "requested";
+          if (localRequested) {
+            setCallStatus("requested");
+            setAcknowledgedAlerts((current) => current.filter((id) => id !== "call"));
+          }
+        }
+      } catch { /* 서버 상태를 사용 */ }
+      try {
+        const response = await fetch(`/api/care/call?patientId=${selectedPersona.id}&t=${Date.now()}`, { cache: "no-store" });
+        if (response.ok) {
+          const serverStatus = ((await response.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null;
+          setCallStatus(serverStatus ?? (localRequested ? "requested" : null));
+          if (serverStatus === "requested") setAcknowledgedAlerts((current) => current.filter((id) => id !== "call"));
+        }
+      } catch {
+        if (localRequested) setCallStatus("requested");
+      }
+    };
+    void updateCall();
+    const interval = window.setInterval(updateCall, 1500);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== "carelink.careCall" || !event.newValue) return;
+      try {
+        const value = JSON.parse(event.newValue) as { patientId?: string; status?: "requested" | "acknowledged" };
+        if (value.patientId === selectedPersona.id && value.status === "requested") setCallStatus("requested");
+      } catch { /* 서버 polling으로 계속 확인 */ }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => { window.clearInterval(interval); window.removeEventListener("storage", onStorage); };
+  }, [selectedPersona.id]);
+
+  async function acknowledgeCall() {
+    const response = await fetch("/api/care/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: selectedPersona.id, action: "acknowledge" }) });
+    if (response.ok) {
+      setCallStatus("acknowledged");
+      try { window.localStorage.setItem("carelink.careCall", JSON.stringify({ patientId: selectedPersona.id, status: "acknowledged", at: Date.now() })); } catch { /* 서버 상태는 저장됨 */ }
+    }
+  }
+
+  async function sendExplanation() {
+    const text = explanation.trim() || `${selectedPersona.name} 어르신, 현재 상태를 확인하고 있습니다. ${soap.assessment}`;
+    const response = await fetch("/api/care/explanation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: getChatSessionId(selectedPersona.id), text, language: "ko" }) });
+    if (response.ok) { setExplanation(text); explanationSentRef.current = true; setExplanationSent(true); }
+  }
+
+  function acknowledgeAlert(id: string) {
+    setAcknowledgedAlerts((current) => current.includes(id) ? current : [...current, id]);
+  }
+
+
+  const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length;
 
   return (
     <main className={styles.page}>
@@ -63,14 +141,17 @@ export function ClinicianDashboard() {
         </Link>
         <div className={styles.topbarActions}>
           <span className={styles.updated}>오늘 09:18 업데이트</span>
-          <Link className={styles.patientLink} href="/patient">환자 화면</Link>
+          <select aria-label="환자 선택" value={selectedPersona.id} onChange={(event) => setSelectedPersonaId(event.target.value)}>
+            {patientPersonas.map((persona) => <option key={persona.id} value={persona.id}>{persona.name} · {persona.age}세</option>)}
+          </select>
+          <Link className={styles.patientLink} href={`/patient?personaId=${selectedPersona.id}`}>환자 화면</Link>
         </div>
       </header>
 
       <section className={styles.patientHeader}>
-        <div className={styles.patientIdentity}>
+          <div className={styles.patientIdentity}>
           <span className={styles.patientAvatar}>정</span>
-          <div><p>담당 환자 · 실시간 요약</p><h1>김정희 <small>82세</small></h1><span>햇살관 203호 · 장기요양 2등급</span></div>
+          <div><p>담당 환자 · 실시간 요약</p><h1>{selectedPersona.name} <small>{selectedPersona.age}세</small></h1><span>{selectedPersona.room} · {selectedPersona.diagnosis}</span></div>
         </div>
         <button className={styles.roundButton} type="button">오늘 회진</button>
       </section>
@@ -80,30 +161,35 @@ export function ClinicianDashboard() {
       </div>
 
       <section className={styles.prioritySection}>
-        <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><span>확인할 기록 2건 ›</span></div>
+        <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><button className={styles.recordToggle} type="button" onClick={() => setShowRecords((value) => !value)}>확인할 기록 {visiblePriorityCount}건 {showRecords ? "⌃" : "›"}</button></div>
         <div className={styles.priorityGrid}>
-          {priorities.map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.label}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p></div><time>{item.time}</time></article>)}
+          {priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.id}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p><button type="button" className={styles.alertConfirm} onClick={() => acknowledgeAlert(item.id)}>확인</button></div><time>{item.time}</time></article>)}
         </div>
+        {showRecords ? <div className={styles.recordDetails} role="region" aria-label="확인할 기록 상세"><button type="button" onClick={() => document.querySelector("." + styles.panel)?.scrollIntoView({ behavior: "smooth" })}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => document.querySelector("." + styles.soap)?.scrollIntoView({ behavior: "smooth" })}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button></div> : null}
       </section>
 
       <section className={styles.dashboardGrid}>
         <article className={styles.panel}>
-          <div className={styles.panelHeading}><div><p>OBJECTIVE SIGNALS</p><h2>생체신호 · 모션</h2></div><span className={styles.badge}>현재 기록</span></div>
+          <div className={styles.panelHeading}><div><p>OBJECTIVE SIGNALS · MOCK</p><h2>생체신호 · 모션</h2></div><span className={styles.badge}>연동 전 목업</span></div>
           <div className={styles.metrics}>
-            <div><span>맥박</span><strong>76 <small>bpm</small></strong><em>안정</em></div>
-            <div><span>SpO₂</span><strong>97 <small>%</small></strong><em>안정</em></div>
-            <div><span>ECG</span><strong>정상 <small>리듬</small></strong><em>안정</em></div>
+            <div><span>맥박</span><strong>{selectedPersona.demoVitals.heartRate} <small>bpm</small></strong><em>시나리오 값</em></div>
+            <div><span>SpO₂</span><strong>{selectedPersona.demoVitals.spo2} <small>%</small></strong><em>시나리오 값</em></div>
+            <div><span>ECG</span><strong>정상 <small>동성 리듬</small></strong><em>시나리오 값</em></div>
           </div>
-          <div className={styles.motion}><div><span>체위·모션 추적</span><strong>2시간 6분 동일 체위</strong></div><div className={styles.timeline}><i /><i /><i /><i /></div><div className={styles.timelineLabels}><span>07:00</span><span>08:00</span><span>09:00</span><span>현재</span></div></div>
+          <div className={styles.motion}><div><span>체위·모션 추적</span><strong>{selectedPersona.demoVitals.motion}</strong></div><div className={styles.timeline}><i /><i /><i /><i /></div><div className={styles.timelineLabels}><span>07:00</span><span>08:00</span><span>09:00</span><span>현재</span></div><small className={styles.demoNote}>{selectedPersona.demoVitals.note}</small></div>
           <button className={styles.textButton} type="button">원시 센서 기록 보기 ›</button>
         </article>
 
         <article className={styles.panel}>
-          <div className={styles.panelHeading}><div><p>OBSERVATION</p><h2>대화·표정 관찰</h2></div><span className={styles.trend}>↗ 안정 표현 증가</span></div>
+          <div className={styles.panelHeading}><div><p>OBSERVATION</p><h2>대화·표정 관찰</h2></div><span className={styles.trend}>{observation.trend}</span></div>
           <div className={styles.chart} aria-label="최근 7일 대화 관찰 기록">{days.map(([day, value]) => <div key={day as string}><i style={{ height: `${value}%` }} /><span>{day}</span></div>)}</div>
           <div className={styles.legend}><span><i /> 안정 <b>주요 표현</b></span><span><i /> 보통 <b>혼재</b></span><span><i /> 관찰 <b>확인 필요</b></span></div>
-          <div className={styles.insight}>○ <span>오늘 아침 대화에서 “창밖을 보고 싶다”는 표현이 관찰되었습니다.</span></div>
-          <FacialObservation />
+          <div className={styles.insight}>○ <span>{observation.detail} {observation.evidence !== "환자 발화 없음" ? `최근 발화: “${observation.evidence}”` : ""}</span></div>
+          <FacialObservation patientId={selectedPersona.id} />
+          <div className={styles.conversationLog}>
+            <button type="button" className={styles.conversationToggle} onClick={() => setShowConversation((value) => !value)}>{showConversation ? "대화 기록 닫기" : "환자 챗봇 대화 보기"} <span>{conversation.filter((item) => item.role === "patient").length}회</span></button>
+            {showConversation ? <div className={styles.conversationMessages} aria-label="환자 챗봇 대화 기록"><small>환자 상태 확인과 의료진 검토를 위한 대화 기록입니다.</small>{conversation.length ? conversation.slice(-8).map((item, index) => <p className={item.role === "patient" ? styles.patientMessage : styles.assistantMessage} key={`${item.createdAt}-${index}`}><b>{item.role === "patient" ? "환자" : "CareLink"}</b>{item.text}</p>) : <small>아직 대화 기록이 없습니다.</small>}</div> : null}
+          </div>
         </article>
       </section>
 
@@ -117,7 +203,8 @@ export function ClinicianDashboard() {
         </div>
       </section>
 
-      <section className={styles.handoff}><div><p>TWO-WAY COMMUNICATION</p><h2>환자에게는 더 쉬운 말로</h2><span>검토한 결과를 일상 언어로 바꾸어 환자 화면에 전달합니다.</span></div><div className={styles.preview}><small>환자용 미리보기</small><p>자세를 편하게 바꿔 드리고, 오늘 저녁에 허리 불편감과 잠은 다시 살펴볼게요.</p><button type="button">쉬운 설명 전달하기 ›</button></div></section>
+      <section className={styles.handoff}><div><p>TWO-WAY COMMUNICATION</p><h2>환자에게는 더 쉬운 말로</h2><span>SOAP 초안을 참고해 의료진이 수정한 설명을 환자 화면에 전달합니다.</span></div><div className={styles.preview}><small>환자용 미리보기</small><textarea value={explanation} onChange={(event) => { setExplanationSent(false); setExplanation(event.target.value); }} aria-label="환자에게 전달할 쉬운 설명" /><button type="button" onClick={() => void sendExplanation()}>{explanationSent ? "전달 완료 ✓" : "쉬운 설명 전달하기 ›"}</button></div></section>
+      {callStatus === "requested" ? <div className={styles.callModalBackdrop} role="presentation"><section className={styles.callModal} role="alertdialog" aria-modal="true" aria-labelledby="call-modal-title"><span className={styles.callModalIcon}>!</span><div><p>CARE ALERT</p><h2 id="call-modal-title">환자가 의료진을 호출했습니다</h2><span>환자 화면의 도움 요청을 확인해 주세요.</span></div><button type="button" onClick={() => void acknowledgeCall()}>확인 처리</button></section></div> : null}
     </main>
   );
 }

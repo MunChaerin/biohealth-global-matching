@@ -6,7 +6,14 @@ export const DEMO_PATIENT_ID = "demo-patient-01";
 
 // 아직 로그인/기관 권한이 없어서, 카메라 API는 등록된 데모 환자만 받는다.
 // 인증이 생기면 세션의 환자 권한으로 확인하도록 바꿔야 한다.
-export const DEMO_PATIENT_IDS: readonly string[] = [DEMO_PATIENT_ID];
+// 환자 페르소나 선택 기능에서 사용하는 시나리오 환자도 카메라 데모 권한을 가진다.
+// 실제 서비스에서는 이 목록 대신 로그인 세션과 기관별 환자 권한을 확인해야 한다.
+export const DEMO_PATIENT_IDS: readonly string[] = [
+  DEMO_PATIENT_ID,
+  "tanaka-haruko",
+  "kim-sunja",
+  "sato-kenji",
+];
 
 export function isDemoPatient(patientId: string): boolean {
   return DEMO_PATIENT_IDS.includes(patientId);

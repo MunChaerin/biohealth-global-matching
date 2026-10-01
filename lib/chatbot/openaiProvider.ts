@@ -185,6 +185,7 @@ function buildInput(input: ChatbotTurnInput): string {
       recentMessages: context.messages.slice(-8),
       patientText: input.patientText,
       language: context.language ?? "ko",
+      personaSummary: context.personaSummary,
     },
     null,
     2,

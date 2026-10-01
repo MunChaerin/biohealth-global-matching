@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { DEMO_PATIENT_ID, type CameraStatus } from "../../lib/camera/report";
 import type { ChatLanguage } from "../../lib/chatbot/types";
-import { sendReport, useFaceExpression } from "./useFaceExpression";
+import { sendReport, useFaceExpression, type MouthAssistStatus } from "./useFaceExpression";
 import styles from "./patient-chat.module.css";
 
 // 환자가 카메라를 켜기로 동의했는지. 한 번 정하면 이 기기에서 기억하고, 언제든 끌 수 있다.
@@ -51,10 +51,11 @@ const messages: Record<ChatLanguage, Record<Exclude<CameraStatus, "off">, { text
  * 끄면 카메라·분석·전송이 모두 멈추고, 의료진 화면에는 "환자가 카메라를 끔"만 한 번 알린다.
  * 영상은 브라우저 안에서만 쓰고 저장·전송하지 않는다.
  */
-export function CameraIndicator({ language = "ko" }: { language?: ChatLanguage }) {
+export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, speechAssistActive = false }: { language?: ChatLanguage; patientId?: string; speechAssistActive?: boolean }) {
   const [consent, setConsent] = useState<Consent>("unknown");
   const [loaded, setLoaded] = useState(false);
-  const { videoRef, status, previewFilter } = useFaceExpression(consent === "on");
+  const [mouthStatus, setMouthStatus] = useState<MouthAssistStatus>("waiting");
+  const { videoRef, status, previewFilter } = useFaceExpression(consent === "on", patientId, setMouthStatus);
 
   useEffect(() => {
     setConsent(readConsent());
@@ -69,7 +70,7 @@ export function CameraIndicator({ language = "ko" }: { language?: ChatLanguage }
   function turnOff() {
     saveConsent("off");
     setConsent("off");
-    void sendReport({ patientId: DEMO_PATIENT_ID, measuredAt: new Date().toISOString(), status: "off" });
+    void sendReport({ patientId, measuredAt: new Date().toISOString(), status: "off" });
   }
 
   const isJapanese = language === "ja";
@@ -107,6 +108,7 @@ export function CameraIndicator({ language = "ko" }: { language?: ChatLanguage }
             {message?.hint ? <small>{message.hint}</small> : null}
           </div>
           <button type="button" className={styles.cameraOffButton} onClick={turnOff}>{isJapanese ? "停止" : "끄기"}</button>
+          {speechAssistActive ? <small className={styles.cameraAssist}>{isJapanese ? `口元補助: ${mouthStatus === "speaking" ? "話しています" : mouthStatus === "noFace" ? "顔を合わせてください" : "発話を確認中"}` : `입모양 보조: ${mouthStatus === "speaking" ? "말하는 중" : mouthStatus === "noFace" ? "얼굴을 맞춰 주세요" : "말하기를 확인 중"}`}</small> : null}
         </>
       )}
     </div>

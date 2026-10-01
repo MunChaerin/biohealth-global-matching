@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type {
   ChatLanguage,
   ChatbotContext,
@@ -9,7 +9,8 @@ import type {
   SafetyFlag,
   SubjectiveData,
 } from "../../lib/chatbot/types";
-import { DEMO_CHAT_SESSION_ID } from "../../lib/chatbot/soapDraft";
+import { getChatSessionId } from "../../lib/chatbot/soapDraft";
+import type { PatientPersona } from "../../lib/patient/personas";
 
 const firstQuestion = "오늘 가장 불편한 점은 무엇인가요?";
 const firstQuestionJapanese = "今日、いちばんつらいことは何ですか？";
@@ -30,8 +31,8 @@ function mergeSafetyFlags(current: SafetyFlag[], incoming: SafetyFlag[]): Safety
   return [...current, ...incoming.filter((flag) => !seen.has(`${flag.type}:${flag.severity}:${flag.evidence}`))];
 }
 
-export function usePatientChat() {
-  const ids = useMemo(() => ({ sessionId: DEMO_CHAT_SESSION_ID, patientId: "demo-patient" }), []);
+export function usePatientChat(persona: PatientPersona) {
+  const ids = useMemo(() => ({ sessionId: getChatSessionId(persona.id), patientId: persona.id }), [persona.id]);
   const [context, setContext] = useState<ChatbotContext>({
     ...ids,
     state: "CHIEF_CONCERN",
@@ -39,12 +40,31 @@ export function usePatientChat() {
     subjective: {},
     safetyFlags: [],
     language: "ko",
+    personaId: persona.id,
+    personaSummary: `${persona.diagnosis}. 주요 관찰 증상: ${persona.symptoms}. 복용약: ${persona.medications}.`,
   });
   const contextRef = useRef(context);
   const requestInFlight = useRef(false);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sessionAction, setSessionAction] = useState<ChatbotTurnOutput["sessionAction"]>("continue");
+
+  useEffect(() => {
+    const next: ChatbotContext = {
+      ...ids,
+      state: "CHIEF_CONCERN",
+      messages: [message("assistant", firstQuestion)],
+      subjective: {},
+      safetyFlags: [],
+      language: context.language ?? "ko",
+      personaId: persona.id,
+      personaSummary: `${persona.diagnosis}. 주요 관찰 증상: ${persona.symptoms}. 복용약: ${persona.medications}.`,
+    };
+    contextRef.current = next;
+    setContext(next);
+    setSessionAction("continue");
+    setError(null);
+  }, [persona.id]);
 
   function syncSession(next: ChatbotContext) {
     void fetch("/api/chat/session", {

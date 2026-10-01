@@ -1,6 +1,9 @@
 import type { ChatbotContext, SubjectiveData } from "./types";
+import { getPatientPersona } from "../patient/personas";
 
-export const DEMO_CHAT_SESSION_ID = "demo-patient-session";
+export function getChatSessionId(personaId: string): string {
+  return `demo-${personaId}`;
+}
 
 export interface SoapDraft {
   subjective: string;
@@ -35,7 +38,8 @@ export function createSoapDraft(context: ChatbotContext): SoapDraft {
     ? subjectiveItems.join(" · ")
     : "환자 대화 정보가 아직 수집되지 않았습니다.";
   const messageCount = context.messages.filter((message) => message.role === "patient").length;
-  const objective = "현재 실제 카메라·센서·모션 값은 아직 연결되지 않았습니다. S 정보 중심의 초안으로 검토하세요.";
+  const persona = getPatientPersona(context.personaId ?? context.patientId);
+  const objective = `시나리오 참고값 · 맥박 ${persona.demoVitals.heartRate} bpm · SpO₂ ${persona.demoVitals.spo2}% · ECG ${persona.demoVitals.ecg} · 모션 ${persona.demoVitals.motion}. 실제 센서 측정값이 아니므로 의료진 확인이 필요합니다.`;
   const severity = context.subjective.severityNrs;
   const assessment = context.safetyFlags.length > 0
     ? "안전 위험 신호가 감지되어 일반 대화보다 즉시 안전 대응과 의료진 확인이 우선입니다."
@@ -50,7 +54,7 @@ export function createSoapDraft(context: ChatbotContext): SoapDraft {
     subjective,
     subjectiveMeta: `대화 ${messageCount}회 · 상태 ${context.state}`,
     objective,
-    objectiveMeta: "O 데이터 소스 연동 대기",
+    objectiveMeta: "환자 시나리오 기반 참고값 · 실제 센서 연동 전",
     assessment,
     assessmentMeta: context.safetyFlags.length > 0 ? "안전 대응 우선" : "참고 제안 · 의료진 확인 필요",
     plan,

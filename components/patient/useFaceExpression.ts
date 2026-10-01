@@ -60,7 +60,9 @@ export async function sendReport(report: CameraReport): Promise<void> {
  * 영상은 브라우저 밖으로 나가지 않는다. 반환한 videoRef는 미리보기 video 요소에 연결하고,
  * previewFilter(밝기 배율)는 어두운 영상일 때 미리보기를 밝게 보여주는 데 쓴다.
  */
-export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PATIENT_ID) {
+export type MouthAssistStatus = "waiting" | "ready" | "speaking" | "noFace";
+
+export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PATIENT_ID, onMouthStatus?: (status: MouthAssistStatus) => void) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<CameraStatus>(enabled ? "starting" : "off");
   const [previewFilter, setPreviewFilter] = useState(1);
@@ -68,6 +70,7 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
   useEffect(() => {
     if (!enabled) {
       setStatus("off");
+      onMouthStatus?.("waiting");
       return;
     }
     // 카메라 기능이 없는 환경(테스트, 오래된 브라우저, https가 아닌 주소)에서는 켜지 않고 보고도 하지 않는다
@@ -137,8 +140,10 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
         const landmarks = result.faceLandmarks[0];
         if (!landmarks) {
           report("noFace");
+          onMouthStatus?.("noFace");
         } else {
           const metrics = extractMetrics(pointsFromLandmarks(landmarks, video.videoWidth / video.videoHeight));
+          onMouthStatus?.(metrics.mouthOpen > 0.055 ? "speaking" : "ready");
           const sample = monitor.addFrame(timeMs, metrics);
           if (sample) {
             lastSample = sample;
@@ -212,7 +217,7 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
       stream?.getTracks().forEach((track) => track.stop());
       landmarker?.close();
     };
-  }, [enabled, patientId]);
+  }, [enabled, patientId, onMouthStatus]);
 
   return { videoRef, status, previewFilter };
 }
