@@ -44,8 +44,12 @@ export function ClinicianDashboard() {
   const [showConversation, setShowConversation] = useState(false);
   const [observation, setObservation] = useState(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: "", patientId: "" }));
   const planEditedRef = useRef(false);
+  const explanationSentRef = useRef(false);
 
   useEffect(() => {
+    planEditedRef.current = false;
+    explanationSentRef.current = false;
+    setExplanationSent(false);
     const update = async () => {
       try {
         const response = await fetch(`/api/chat/session?sessionId=${getChatSessionId(selectedPersona.id)}`, { cache: "no-store" });
@@ -57,7 +61,7 @@ export function ClinicianDashboard() {
         setObservation(createConversationObservation(payload.context));
         setConversation(payload.context.messages);
         if (!planEditedRef.current) setPlan(next.plan);
-        if (!explanationSent) setExplanation(next.assessment);
+        if (!explanationSentRef.current) setExplanation(next.assessment);
       } catch {
         // 의료진 화면은 마지막 정상 초안을 유지한다.
       }
@@ -118,7 +122,7 @@ export function ClinicianDashboard() {
   async function sendExplanation() {
     const text = explanation.trim() || `${selectedPersona.name} 어르신, 현재 상태를 확인하고 있습니다. ${soap.assessment}`;
     const response = await fetch("/api/care/explanation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: getChatSessionId(selectedPersona.id), text, language: "ko" }) });
-    if (response.ok) { setExplanation(text); setExplanationSent(true); }
+    if (response.ok) { setExplanation(text); explanationSentRef.current = true; setExplanationSent(true); }
   }
 
   function acknowledgeAlert(id: string) {

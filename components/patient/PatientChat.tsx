@@ -50,20 +50,24 @@ export function PatientChat() {
 
   useEffect(() => {
     const update = async () => {
-      const [callResponse, explanationResponse] = await Promise.all([
-        fetch(`/api/care/call?patientId=${persona.id}`, { cache: "no-store" }),
-        fetch(`/api/care/explanation?sessionId=${getChatSessionId(persona.id)}`, { cache: "no-store" }),
-      ]);
-      if (callResponse?.ok) {
-        const status = ((await callResponse.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null;
-        if (status === "acknowledged") {
-          setCallStatus(null);
-          setCallAcknowledged(true);
-        } else {
-          setCallStatus(status);
+      try {
+        const [callResponse, explanationResponse] = await Promise.all([
+          fetch(`/api/care/call?patientId=${persona.id}`, { cache: "no-store" }),
+          fetch(`/api/care/explanation?sessionId=${getChatSessionId(persona.id)}`, { cache: "no-store" }),
+        ]);
+        if (callResponse?.ok) {
+          const status = ((await callResponse.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null;
+          if (status === "acknowledged") {
+            setCallStatus(null);
+            setCallAcknowledged(true);
+          } else {
+            setCallStatus(status);
+          }
         }
+        if (explanationResponse?.ok) setExplanation(((await explanationResponse.json()) as { explanation?: { text: string } }).explanation?.text ?? null);
+      } catch {
+        // 케어 상태 조회가 잠시 실패해도 대화 화면은 계속 사용할 수 있다.
       }
-      if (explanationResponse?.ok) setExplanation(((await explanationResponse.json()) as { explanation?: { text: string } }).explanation?.text ?? null);
     };
     const interval = window.setInterval(() => void update(), 1500);
     return () => window.clearInterval(interval);

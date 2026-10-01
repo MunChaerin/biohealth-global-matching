@@ -8,7 +8,12 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const body = await request.json() as { patientId?: string; sessionId?: string; action?: "request" | "acknowledge" };
+  let body: { patientId?: string; sessionId?: string; action?: "request" | "acknowledge" };
+  try {
+    body = await request.json() as { patientId?: string; sessionId?: string; action?: "request" | "acknowledge" };
+  } catch {
+    return NextResponse.json({ error: "JSON 본문이 필요합니다." }, { status: 400 });
+  }
   if (!body.patientId) return NextResponse.json({ error: "patientId가 필요합니다." }, { status: 400 });
   if (body.action === "acknowledge") return NextResponse.json({ call: acknowledgeCareCall(body.patientId) });
   return NextResponse.json({ call: requestCareCall(body.patientId, body.sessionId ?? "") });
