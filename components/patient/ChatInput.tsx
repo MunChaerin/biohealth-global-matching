@@ -13,6 +13,8 @@ interface ChatInputProps {
   onStartListening: (onTranscript: (text: string) => void) => void;
   onStopListening: () => void;
   placeholder?: string;
+  onFinish?: () => void;
+  finishDisabled?: boolean;
 }
 
 export function ChatInput({
@@ -25,6 +27,8 @@ export function ChatInput({
   onStartListening,
   onStopListening,
   placeholder = "불편한 점을 편하게 말씀해 주세요.",
+  onFinish,
+  finishDisabled = false,
 }: ChatInputProps) {
   const [text, setText] = useState("");
 
@@ -80,6 +84,7 @@ export function ChatInput({
           <button className={styles.sendButton} type="submit" disabled={disabled || isLoading || text.trim().length === 0}>
             {isLoading ? "전송 중" : "보내기"}
           </button>
+          {onFinish ? <button className={styles.finishButton} type="button" onClick={onFinish} disabled={disabled || isLoading || finishDisabled}>대화 마치기</button> : null}
         </div>
       </div>
       {speechError ? <p className={styles.speechStatus} role="status">{speechError}</p> : null}
