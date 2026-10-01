@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { FacialObservation } from "./FacialObservation";
-import { CHAT_CONTEXT_STORAGE_KEY, createSoapDraft, type SoapDraft } from "../../lib/chatbot/soapDraft";
+import { createSoapDraft, DEMO_CHAT_SESSION_ID, type SoapDraft } from "../../lib/chatbot/soapDraft";
 import type { ChatbotContext } from "../../lib/chatbot/types";
 import styles from "./clinician-dashboard.module.css";
 
@@ -19,8 +19,8 @@ const days = [
 const emptySoap: SoapDraft = {
   subjective: "환자 대화 정보가 아직 수집되지 않았습니다.",
   subjectiveMeta: "대화 0회",
-  objective: "카메라·센서·모션 데이터 연동 대기 중.",
-  objectiveMeta: "카메라 · 센서 · 모션 데이터",
+  objective: "현재 실제 카메라·센서·모션 값은 아직 연결되지 않았습니다.",
+  objectiveMeta: "O 데이터 소스 연동 대기",
   assessment: "대화가 시작되면 참고 제안을 생성합니다.",
   assessmentMeta: "대기 중",
   plan: "의료진이 최종 계획을 입력합니다.",
@@ -28,32 +28,28 @@ const emptySoap: SoapDraft = {
   updatedAt: "",
 };
 
-function readSoapDraft(): SoapDraft {
-  try {
-    const raw = window.localStorage.getItem(CHAT_CONTEXT_STORAGE_KEY);
-    if (!raw) return emptySoap;
-    return createSoapDraft(JSON.parse(raw) as ChatbotContext);
-  } catch {
-    return emptySoap;
-  }
-}
-
 export function ClinicianDashboard() {
   const [soap, setSoap] = useState<SoapDraft>(emptySoap);
   const [plan, setPlan] = useState(emptySoap.plan);
   const planEditedRef = useRef(false);
 
   useEffect(() => {
-    const update = () => {
-      const next = readSoapDraft();
-      setSoap(next);
-      if (!planEditedRef.current) setPlan(next.plan);
+    const update = async () => {
+      try {
+        const response = await fetch(`/api/chat/session?sessionId=${DEMO_CHAT_SESSION_ID}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = (await response.json()) as { context?: ChatbotContext | null };
+        if (!payload.context) return;
+        const next = createSoapDraft(payload.context);
+        setSoap(next);
+        if (!planEditedRef.current) setPlan(next.plan);
+      } catch {
+        // 의료진 화면은 마지막 정상 초안을 유지한다.
+      }
     };
     update();
-    window.addEventListener("storage", update);
     const interval = window.setInterval(update, 1000);
     return () => {
-      window.removeEventListener("storage", update);
       window.clearInterval(interval);
     };
   }, []);
@@ -112,10 +108,10 @@ export function ClinicianDashboard() {
       </section>
 
       <section className={styles.soap}>
-        <div className={styles.soapHeading}><div><p>MEDICAL REVIEW · LIVE</p><h2>SOAP 보고서 초안</h2><span>환자 챗봇 대화가 업데이트될 때마다 실시간으로 갱신되는 검토용 초안입니다.</span></div><button type="button">초안 저장</button></div>
+        <div className={styles.soapHeading}><div><p>MEDICAL REVIEW · LIVE DEMO</p><h2>SOAP 보고서 초안</h2><span>환자 챗봇 대화가 업데이트될 때마다 서버 세션을 통해 갱신되는 검토용 초안입니다.</span></div><button type="button">초안 저장</button></div>
         <div className={styles.soapGrid}>
           <article className={styles.soapS}><b>S</b><div><h3>Subjective <small>대화 기반</small></h3><p>{soap.subjective}</p><span>{soap.subjectiveMeta}</span></div></article>
-          <article className={styles.soapO}><b>O</b><div><h3>Objective <small>센서 · 모션</small></h3><p>{soap.objective}</p><span>{soap.objectiveMeta}</span></div></article>
+          <article className={styles.soapO}><b>O</b><div><h3>Objective <small>연동 대기</small></h3><p>{soap.objective}</p><span>{soap.objectiveMeta}</span></div></article>
           <article className={styles.soapA}><b>A</b><div><h3>Assessment <small>참고 제안</small></h3><p>{soap.assessment}</p><span>{soap.assessmentMeta}</span></div></article>
           <article className={styles.soapP}><b>P</b><div><h3>Plan <small>의료진 편집</small></h3><textarea value={plan} onChange={(event) => { planEditedRef.current = true; setPlan(event.target.value); }} aria-label="치료 계획 편집" /><span>{soap.planMeta}</span></div></article>
         </div>

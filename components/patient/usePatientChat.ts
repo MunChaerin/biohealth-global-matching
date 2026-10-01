@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import type {
   ChatLanguage,
   ChatbotContext,
@@ -9,7 +9,7 @@ import type {
   SafetyFlag,
   SubjectiveData,
 } from "../../lib/chatbot/types";
-import { CHAT_CONTEXT_STORAGE_KEY } from "../../lib/chatbot/soapDraft";
+import { DEMO_CHAT_SESSION_ID } from "../../lib/chatbot/soapDraft";
 
 const firstQuestion = "오늘 가장 불편한 점은 무엇인가요?";
 const firstQuestionJapanese = "今日、いちばんつらいことは何ですか？";
@@ -31,7 +31,7 @@ function mergeSafetyFlags(current: SafetyFlag[], incoming: SafetyFlag[]): Safety
 }
 
 export function usePatientChat() {
-  const ids = useMemo(() => ({ sessionId: createId("session"), patientId: createId("patient") }), []);
+  const ids = useMemo(() => ({ sessionId: DEMO_CHAT_SESSION_ID, patientId: "demo-patient" }), []);
   const [context, setContext] = useState<ChatbotContext>({
     ...ids,
     state: "CHIEF_CONCERN",
@@ -46,13 +46,13 @@ export function usePatientChat() {
   const [error, setError] = useState<string | null>(null);
   const [sessionAction, setSessionAction] = useState<ChatbotTurnOutput["sessionAction"]>("continue");
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(CHAT_CONTEXT_STORAGE_KEY, JSON.stringify(context));
-    } catch {
-      // 저장소를 사용할 수 없는 환경에서도 대화 자체는 계속한다.
-    }
-  }, [context]);
+  function syncSession(next: ChatbotContext) {
+    void fetch("/api/chat/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    }).catch(() => undefined);
+  }
 
   function commit(next: ChatbotContext) {
     contextRef.current = next;
@@ -73,7 +73,9 @@ export function usePatientChat() {
   }
 
   function finishSession() {
-    commit({ ...contextRef.current, state: "READY_FOR_SOAP" });
+    const next = { ...contextRef.current, state: "READY_FOR_SOAP" as const };
+    commit(next);
+    syncSession(next);
     setSessionAction("complete");
   }
 
@@ -114,6 +116,7 @@ export function usePatientChat() {
         safetyFlags: nextSafetyFlags,
       };
       commit(nextContext);
+      syncSession(nextContext);
       setSessionAction(output.sessionAction);
       return output;
     } catch (error) {
