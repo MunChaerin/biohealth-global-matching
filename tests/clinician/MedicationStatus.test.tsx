@@ -4,15 +4,15 @@ import { MedicationStatus } from "../../components/clinician/MedicationStatus";
 import type { TodayMedication } from "../../lib/medication/intakeStore";
 import { getMedicationSchedule } from "../../lib/medication/schedule";
 
-const [amlodipine, metformin] = getMedicationSchedule("tanaka-haruko");
+const [lyribea, tylenol] = getMedicationSchedule("tanaka-haruko");
 
 const today: TodayMedication = {
   date: "2026-10-01",
   items: [
-    { ...amlodipine!, status: "taken", takenAt: "2026-10-01T00:05:00.000Z", mismatchCount: 1, lastMismatch: { detectedDrugCode: "pending:metformin", at: "2026-10-01T00:03:00.000Z" } },
-    { ...metformin!, status: "pending", mismatchCount: 0 },
+    { ...lyribea!, status: "taken", takenAt: "2026-10-01T00:05:00.000Z", mismatchCount: 1, lastMismatch: { detectedDrugCode: "K-011354", at: "2026-10-01T00:03:00.000Z" } },
+    { ...tylenol!, status: "pending", mismatchCount: 0 },
   ],
-  next: { ...metformin!, status: "pending", mismatchCount: 0 },
+  next: { ...tylenol!, status: "pending", mismatchCount: 0 },
 };
 
 describe("MedicationStatus", () => {
@@ -24,9 +24,9 @@ describe("MedicationStatus", () => {
     expect(await screen.findByText("1 / 2 복용")).toBeInTheDocument();
 
     const [first, second] = screen.getAllByRole("listitem");
-    expect(within(first!).getByText("암로디핀 1알")).toBeInTheDocument();
+    expect(within(first!).getByText("리리베아캡슐 50mg 1캡슐")).toBeInTheDocument();
     expect(within(first!).getByText(/^복용 /)).toBeInTheDocument();
-    expect(within(first!).getByText(/다른 약을 비춤 1회 · 마지막: 메트포르민/)).toBeInTheDocument();
+    expect(within(first!).getByText(/다른 약을 비춤 1회 · 마지막: 애드빌정/)).toBeInTheDocument();
     expect(within(second!).getByText("미복용")).toBeInTheDocument();
     expect(fetch).toHaveBeenCalledWith("/api/medication?patientId=tanaka-haruko", { cache: "no-store" });
   });

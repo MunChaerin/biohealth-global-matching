@@ -1,8 +1,9 @@
 // 환자별 복약 일정 (데모용). DB가 생기면 여기 대신 DB에서 읽는다.
 //
-// drugCode는 알약 인식 모델의 클래스와 맞추는 약 코드(AI Hub 경구약제 데이터의 품목기준코드)다.
-// 시연에 쓸 실제 알약 3종이 정해지기 전이라 지금은 "pending:약이름" 임시 코드이고,
-// 외형 설명도 대표적인 제품 기준 예시라서, 시연 약이 확정되면 코드·외형을 실제 약에 맞춰 바꿔야 한다.
+// drugCode는 알약 인식 모델의 클래스와 맞추는 약 코드(AI Hub 경구약제 데이터의 K-코드)다.
+// 시연 환자(다나카 하루코)는 실제 시연 알약 2종(리리베아캡슐 50mg, 타이레놀정 500mg)으로 되어 있고,
+// 모델이 학습하는 10종 목록은 camera-model/pill-recognition/classes.json이다.
+// 다른 두 환자의 약은 모델이 학습하지 않은 약이라 "pending:약이름" 임시 코드 (알약 확인 시연에는 쓰지 않음).
 
 export interface MedicationItem {
   id: string;
@@ -17,11 +18,10 @@ export interface MedicationItem {
 }
 
 export const medicationSchedules: Record<string, MedicationItem[]> = {
+  // 시연 환자: 우측 하지 저림(신경병증성 통증) -> 아침 프레가발린, 저녁 아세트아미노펜
   "tanaka-haruko": [
-    { id: "tanaka-amlodipine-am", drugCode: "pending:amlodipine", name: "암로디핀", japaneseName: "アムロジピン", appearance: "흰색 팔각형 알약", japaneseAppearance: "白い八角形の錠剤", dose: "1알", japaneseDose: "1錠", time: "08:00" },
-    { id: "tanaka-metformin-am", drugCode: "pending:metformin", name: "메트포르민", japaneseName: "メトホルミン", appearance: "흰색 긴 타원형 알약", japaneseAppearance: "白い長円形の錠剤", dose: "1알", japaneseDose: "1錠", time: "08:00" },
-    { id: "tanaka-clopidogrel-am", drugCode: "pending:clopidogrel", name: "클로피도그렐", japaneseName: "クロピドグレル", appearance: "분홍색 둥근 알약", japaneseAppearance: "ピンクの丸い錠剤", dose: "1알", japaneseDose: "1錠", time: "08:00" },
-    { id: "tanaka-metformin-pm", drugCode: "pending:metformin", name: "메트포르민", japaneseName: "メトホルミン", appearance: "흰색 긴 타원형 알약", japaneseAppearance: "白い長円形の錠剤", dose: "1알", japaneseDose: "1錠", time: "18:00" },
+    { id: "tanaka-lyribea-am", drugCode: "K-045037", name: "리리베아캡슐 50mg", japaneseName: "リリベアカプセル50mg", appearance: "흰색 길쭉한 캡슐 (DWB PGN50)", japaneseAppearance: "白い長いカプセル（DWB PGN50）", dose: "1캡슐", japaneseDose: "1カプセル", time: "08:00" },
+    { id: "tanaka-tylenol-pm", drugCode: "K-004378", name: "타이레놀정 500mg", japaneseName: "タイレノール錠500mg", appearance: "흰색 길쭉한 알약", japaneseAppearance: "白い長い錠剤", dose: "1알", japaneseDose: "1錠", time: "18:00" },
   ],
   "kim-sunja": [
     { id: "kim-acetaminophen-am", drugCode: "pending:acetaminophen", name: "아세트아미노펜", japaneseName: "アセトアミノフェン", appearance: "흰색 긴 알약", japaneseAppearance: "白い長い錠剤", dose: "1알", japaneseDose: "1錠", time: "08:00" },

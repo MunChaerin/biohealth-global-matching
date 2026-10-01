@@ -10,7 +10,7 @@ vi.mock("@mediapipe/tasks-vision", () => ({
 import { CAMERA_CONSENT_KEY, CameraIndicator } from "../../components/patient/CameraIndicator";
 import { getMedicationSchedule } from "../../lib/medication/schedule";
 
-const medication = getMedicationSchedule("tanaka-haruko")[0]!; // 암로디핀
+const medication = getMedicationSchedule("tanaka-haruko")[0]!; // 리리베아캡슐 50mg
 
 function mockCamera() {
   const track = { stop: vi.fn() };
@@ -70,11 +70,11 @@ describe("알약 확인 모드", () => {
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();
     const { onTaken } = renderPillCheck();
-    expect(screen.getByText("암로디핀 1알")).toBeInTheDocument();
+    expect(screen.getByText("리리베아캡슐 50mg 1캡슐")).toBeInTheDocument();
     await screen.findByRole("button", { name: "맞는 약" });
 
     await showPill("맞는 약");
-    expect(await screen.findByText(/맞아요! 암로디핀이에요/)).toBeInTheDocument();
+    expect(await screen.findByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
     expect(medicationPosts()).toHaveLength(0); // 비추기만으로는 기록하지 않음
 
     fireEvent.click(screen.getByRole("button", { name: "먹었어요" }));
@@ -90,7 +90,7 @@ describe("알약 확인 모드", () => {
     await screen.findByRole("button", { name: "다른 약" });
 
     await showPill("다른 약");
-    expect(await screen.findByText(/지금 드실 약이 아니에요. 암로디핀\(흰색 팔각형 알약\)을 비춰 주세요/)).toBeInTheDocument();
+    expect(await screen.findByText(/지금 드실 약이 아니에요. 리리베아캡슐 50mg\(흰색 길쭉한 캡슐 \(DWB PGN50\)\)을 비춰 주세요/)).toBeInTheDocument();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
     });
