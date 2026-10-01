@@ -4,8 +4,17 @@ import type { DominantState, ExpressionTrend, SleepState } from "./types";
 
 export const DEMO_PATIENT_ID = "demo-patient-01";
 
+// 아직 로그인/기관 권한이 없어서, 카메라 API는 등록된 데모 환자만 받는다.
+// 인증이 생기면 세션의 환자 권한으로 확인하도록 바꿔야 한다.
+export const DEMO_PATIENT_IDS: readonly string[] = [DEMO_PATIENT_ID];
+
+export function isDemoPatient(patientId: string): boolean {
+  return DEMO_PATIENT_IDS.includes(patientId);
+}
+
 /** 환자 화면이 보고하는 카메라 상태. measuring일 때만 판정 결과가 있다(측정 못 한 값은 만들지 않음). */
 export type CameraStatus =
+  | "off" // 환자가 카메라를 끔 (분석·전송 중지)
   | "starting" // 모델 로딩 / 카메라 켜는 중
   | "calibrating" // 평상시 표정 기준선 수집 중
   | "measuring" // 판정 중
@@ -22,6 +31,7 @@ export interface CameraReport {
 }
 
 const statuses: readonly CameraStatus[] = [
+  "off",
   "starting",
   "calibrating",
   "measuring",

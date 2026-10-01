@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "../../app/api/camera/route";
 import { DEMO_PATIENT_ID, type CameraReport } from "../../lib/camera/report";
 import { clearCameraReports } from "../../lib/camera/reportStore";
@@ -66,5 +66,36 @@ describe("/api/camera", () => {
   it("patientId 없이 조회하면 400", async () => {
     const response = await GET(new Request("http://localhost/api/camera"));
     expect(response.status).toBe(400);
+  });
+
+  it("데모 환자가 아니면 조회도 저장도 거부한다", async () => {
+    expect((await latest("other-patient")).report).toBeUndefined();
+    const getResponse = await GET(new Request("http://localhost/api/camera?patientId=other-patient"));
+    expect(getResponse.status).toBe(403);
+    expect((await post({ ...measuring, patientId: "other-patient" })).status).toBe(403);
+  });
+
+  it("늦게 도착한 더 오래된 측정은 최신 값을 덮어쓰지 않는다 (예: 끈 뒤에 도착한 측정)", async () => {
+    await post({ patientId: DEMO_PATIENT_ID, measuredAt: "2026-09-29T08:00:10.000Z", status: "off" });
+    await post({ ...measuring, measuredAt: "2026-09-29T08:00:05.000Z" });
+    expect((await latest()).report?.status).toBe("off");
+  });
+
+  describe("배포(production) 환경", () => {
+    afterEach(() => vi.unstubAllEnvs());
+
+    it("CAMERA_DEMO_MODE가 없으면 API를 막는다", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      expect((await post(measuring)).status).toBe(404);
+      const response = await GET(new Request(`http://localhost/api/camera?patientId=${DEMO_PATIENT_ID}`));
+      expect(response.status).toBe(404);
+    });
+
+    it("CAMERA_DEMO_MODE=true면 데모 환자만 허용한다", async () => {
+      vi.stubEnv("NODE_ENV", "production");
+      vi.stubEnv("CAMERA_DEMO_MODE", "true");
+      expect((await post(measuring)).status).toBe(200);
+      expect((await latest()).report?.status).toBe("measuring");
+    });
   });
 });

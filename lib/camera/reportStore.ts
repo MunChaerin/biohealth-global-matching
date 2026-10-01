@@ -8,8 +8,12 @@ const store: Map<string, CameraReport & { receivedAt: string }> =
   new Map();
 (globalThis as Record<string, unknown>).__cameraReports = store;
 
-export function saveCameraReport(report: CameraReport): void {
+/** 최신 결과로 저장한다. 네트워크 지연으로 더 오래된 측정이 늦게 도착하면 무시한다(예: 끈 뒤에 도착한 측정값). */
+export function saveCameraReport(report: CameraReport): boolean {
+  const existing = store.get(report.patientId);
+  if (existing && Date.parse(existing.measuredAt) > Date.parse(report.measuredAt)) return false;
   store.set(report.patientId, { ...report, receivedAt: new Date().toISOString() });
+  return true;
 }
 
 export function getCameraReport(patientId: string): (CameraReport & { receivedAt: string }) | null {
