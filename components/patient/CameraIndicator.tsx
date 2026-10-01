@@ -70,7 +70,7 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
   function turnOff() {
     saveConsent("off");
     setConsent("off");
-    void sendReport({ patientId: DEMO_PATIENT_ID, measuredAt: new Date().toISOString(), status: "off" });
+    void sendReport({ patientId, measuredAt: new Date().toISOString(), status: "off" });
   }
 
   const isJapanese = language === "ja";
