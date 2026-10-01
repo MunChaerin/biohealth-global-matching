@@ -24,3 +24,5 @@
 .cameraDotOn { background: #2d8869; box-shadow: 0 0 0 3px rgba(45,136,105,.15); }
 .cameraDotOff { background: #b9c7c9; }
 .hiddenVideo { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.cameraButton { align-self: flex-start; margin-top: 4px; padding: 8px 12px; color: #fff; background: #2d8869; border: 0; border-radius: 9px; font-size: 11px; font-weight: 800; }
+.cameraOffButton { position: absolute; top: 8px; right: 8px; padding: 5px 10px; color: #25474d; background: rgba(255,255,255,.9); border: 1px solid #dceae6; border-radius: 8px; font-size: 10px; font-weight: 800; }

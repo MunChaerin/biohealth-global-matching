@@ -42,7 +42,7 @@ function cameraErrorStatus(error: unknown): CameraStatus {
   return name === "NotAllowedError" || name === "SecurityError" ? "permissionDenied" : "unavailable";
 }
 
-async function sendReport(report: CameraReport): Promise<void> {
+export async function sendReport(report: CameraReport): Promise<void> {
   try {
     await fetch("/api/camera", {
       method: "POST",
@@ -55,21 +55,27 @@ async function sendReport(report: CameraReport): Promise<void> {
 }
 
 /**
- * 환자 화면이 열려 있는 동안 웹캠으로 표정을 계속 분석하고, 판정 결과(숫자)만 /api/camera로 보낸다.
+ * enabled(환자가 동의하고 켠 상태)인 동안 웹캠으로 표정을 계속 분석하고, 판정 결과(숫자)만 /api/camera로 보낸다.
+ * enabled가 false면 카메라를 아예 켜지 않고, 켜져 있었다면 카메라·분석·전송을 모두 멈춘다.
  * 영상은 브라우저 밖으로 나가지 않는다. 반환한 videoRef는 미리보기 video 요소에 연결하고,
  * previewFilter(밝기 배율)는 어두운 영상일 때 미리보기를 밝게 보여주는 데 쓴다.
  */
-export function useFaceExpression(patientId: string = DEMO_PATIENT_ID) {
+export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PATIENT_ID) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const [status, setStatus] = useState<CameraStatus>("starting");
+  const [status, setStatus] = useState<CameraStatus>(enabled ? "starting" : "off");
   const [previewFilter, setPreviewFilter] = useState(1);
 
   useEffect(() => {
+    if (!enabled) {
+      setStatus("off");
+      return;
+    }
     // 카메라 기능이 없는 환경(테스트, 오래된 브라우저, https가 아닌 주소)에서는 켜지 않고 보고도 하지 않는다
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setStatus("unavailable");
       return;
     }
+    setStatus("starting");
 
     let cancelled = false;
     let stream: MediaStream | null = null;
@@ -206,7 +212,7 @@ export function useFaceExpression(patientId: string = DEMO_PATIENT_ID) {
       stream?.getTracks().forEach((track) => track.stop());
       landmarker?.close();
     };
-  }, [patientId]);
+  }, [enabled, patientId]);
 
   return { videoRef, status, previewFilter };
 }

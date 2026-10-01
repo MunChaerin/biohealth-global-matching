@@ -58,6 +58,13 @@ describe("FacialObservation", () => {
     expect(screen.queryByText(/^지금/)).not.toBeInTheDocument();
   });
 
+  it("환자가 카메라를 끄면 판정 없이 그 상태만 보여준다", async () => {
+    respond({ ...base, receivedAt: new Date().toISOString(), status: "off" });
+    render(<FacialObservation />);
+    expect(await screen.findByText("환자가 카메라를 끔")).toBeInTheDocument();
+    expect(screen.queryByText(/^지금/)).not.toBeInTheDocument();
+  });
+
   it("30초 넘게 소식이 없으면 연결 끊김으로 보고 현재 상태를 숨긴다", async () => {
     respond({
       ...base,

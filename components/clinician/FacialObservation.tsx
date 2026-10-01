@@ -20,6 +20,7 @@ export const dominantLabels: Record<DominantState, string> = {
 };
 
 const statusLabels: Record<CameraStatus, string> = {
+  off: "환자가 카메라를 끔",
   starting: "카메라 켜는 중",
   calibrating: "기준 표정 수집 중",
   measuring: "측정 중",
