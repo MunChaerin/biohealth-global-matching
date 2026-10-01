@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CameraIndicator } from "./CameraIndicator";
+import { useTodayMedication } from "./useTodayMedication";
+import type { MedicationItem } from "../../lib/medication/schedule";
 import { ChatInput } from "./ChatInput";
 import { ChatMessage } from "./ChatMessage";
 import { SafetyNotice } from "./SafetyNotice";
@@ -33,7 +35,13 @@ export function PatientChat() {
   const [callAcknowledged, setCallAcknowledged] = useState(false);
   const [largeText, setLargeText] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
-  const [medicationTaken, setMedicationTaken] = useState(false);
+  const medication = useTodayMedication(persona.id);
+  const [pillCheckMedication, setPillCheckMedication] = useState<MedicationItem | null>(null);
+  const [pillDebug, setPillDebug] = useState(false);
+  useEffect(() => {
+    // 알약 인식 모델 없이 화면 흐름을 확인하는 개발용 모드 (?pillDebug=1)
+    setPillDebug(process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("pillDebug") === "1");
+  }, []);
   const language = context.language ?? "ko";
   const isJapanese = language === "ja";
   const copy = isJapanese
@@ -124,11 +132,36 @@ export function PatientChat() {
         <aside className={styles.patientSide}>
           <section className={styles.moodCard}><div className={styles.cardHeading}><div><p>{copy.moodLabel}</p><h2>{localizedObservation.title}</h2></div><span className={styles.moodFace}>☺</span></div><div className={styles.moodMeter}><span style={{ width: `${observation.score}%` }} /><i /></div><div className={styles.moodLabels}><span>{copy.tired}</span><b>{copy.calm}</b></div><p className={styles.subtle}>{localizedObservation.detail}</p></section>
           <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>{copy.help}</p><small>{callStatus ? copy.callConfirm : callAcknowledged ? (isJapanese ? "医療スタッフが確認しました。もう一度必要なときは押してください。" : "의료진이 확인했어요. 다시 도움이 필요하면 눌러 주세요.") : copy.helpHint}</small></div><button type="button" className={callStatus ? styles.called : ""} onClick={() => void callClinician()} disabled={callStatus === "requested"}>{callStatus ? copy.called : copy.call}</button>{callAcknowledged ? <small className={styles.callConfirm}>{isJapanese ? "医療スタッフが確認しました。ボタンをもう一度使えます。" : "의료진이 확인했어요. 버튼을 다시 사용할 수 있어요."}</small> : null}</section>
-          <CameraIndicator language={language} patientId={persona.id} speechAssistActive={speech.isListening} />
+          <CameraIndicator
+            language={language}
+            patientId={persona.id}
+            speechAssistActive={speech.isListening}
+            pillCheck={pillCheckMedication ? {
+              medication: pillCheckMedication,
+              debug: pillDebug,
+              onClose: () => setPillCheckMedication(null),
+              onTaken: () => void medication.refresh(),
+            } : null}
+          />
         </aside>
       </div>
 
-      <div className={styles.bottomGrid}><section className={styles.medicineCard}><div className={styles.cardHeading}><div><p>{copy.medicine}</p><h2>{copy.medicineName}</h2><small>{copy.medicineTime}</small></div><span className={styles.medicineIcon}>＋</span></div><div className={styles.medicineAction}><span>{copy.medicineHint}</span><button type="button" onClick={() => setMedicationTaken(true)} className={medicationTaken ? styles.completed : ""}>{medicationTaken ? copy.takenDone : copy.taken}</button></div></section><section className={styles.easyPlanCard}><div className={styles.planTitle}><span>♡</span><div><p>{copy.planLabel}</p><h2>{explanation ? (isJapanese ? "医療スタッフからの説明" : "의료진이 보낸 설명") : copy.planTitle}</h2></div></div><p>{explanation ?? copy.planText}</p><button type="button" onClick={() => speech.speak(explanation ?? copy.planText)}>{copy.listen}</button></section></div>
+      <div className={styles.bottomGrid}><section className={styles.medicineCard}>{(() => {
+        const next = medication.today?.next ?? null;
+        const allTaken = !!medication.today && medication.today.items.length > 0 && !next;
+        const nextName = next ? (isJapanese ? next.japaneseName : next.name) : null;
+        return <>
+          <div className={styles.cardHeading}><div><p>{copy.medicine}</p>
+            <h2>{nextName ? `${nextName} ${isJapanese ? next!.japaneseDose : next!.dose}` : allTaken ? (isJapanese ? "今日のお薬はすべて飲みました" : "오늘 약을 모두 드셨어요") : copy.medicineName}</h2>
+            <small>{next ? `${next.time} · ${isJapanese ? next.japaneseAppearance : next.appearance}` : medication.failed ? (isJapanese ? "服薬予定を読み込めませんでした" : "복약 일정을 불러오지 못했어요") : copy.medicineTime}</small>
+          </div><span className={styles.medicineIcon}>＋</span></div>
+          <div className={styles.medicineAction}><span>{next ? (isJapanese ? "飲む前にカメラでお薬を確認します。" : "드시기 전에 카메라로 약을 확인해요.") : copy.medicineHint}</span>
+            {allTaken
+              ? <button type="button" className={styles.completed} disabled>{copy.takenDone}</button>
+              : <button type="button" onClick={() => next && setPillCheckMedication(next)} disabled={!next || !!pillCheckMedication}>{copy.taken}</button>}
+          </div>
+        </>;
+      })()}</section><section className={styles.easyPlanCard}><div className={styles.planTitle}><span>♡</span><div><p>{copy.planLabel}</p><h2>{explanation ? (isJapanese ? "医療スタッフからの説明" : "의료진이 보낸 설명") : copy.planTitle}</h2></div></div><p>{explanation ?? copy.planText}</p><button type="button" onClick={() => speech.speak(explanation ?? copy.planText)}>{copy.listen}</button></section></div>
       <p className={styles.footnote}>{copy.footer}</p>
     </main>
   );

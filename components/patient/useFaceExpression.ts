@@ -62,10 +62,28 @@ export async function sendReport(report: CameraReport): Promise<void> {
  */
 export type MouthAssistStatus = "waiting" | "ready" | "speaking" | "noFace";
 
-export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PATIENT_ID, onMouthStatus?: (status: MouthAssistStatus) => void) {
+/**
+ * 카메라가 켜져 있을 때 표정 분석을 어떻게 할지.
+ * - on: 표정 분석·전송
+ * - paused: 표정 관찰에 동의했지만 알약 확인 중 -> 분석 멈춤, 의료진 화면에는 "paused" 상태만 전송
+ * - off: 표정 관찰에 동의하지 않고 알약 확인용으로만 카메라를 켬 -> 분석·전송 모두 안 함
+ * 카메라를 껐다 켜지 않도록 effect가 아니라 ref로 읽는다.
+ */
+export type ExpressionAnalysis = "on" | "paused" | "off";
+
+export function useFaceExpression(
+  enabled: boolean,
+  patientId: string = DEMO_PATIENT_ID,
+  onMouthStatus?: (status: MouthAssistStatus) => void,
+  analysis: ExpressionAnalysis = "on",
+) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<CameraStatus>(enabled ? "starting" : "off");
   const [previewFilter, setPreviewFilter] = useState(1);
+  const analysisRef = useRef(analysis);
+  analysisRef.current = analysis;
+  // 알약 확인도 같은 밝기 보정을 쓰도록 바깥에 꺼내 둔다 (카메라가 켜져 있을 때만 값이 있음)
+  const correctedFrameRef = useRef<((video: HTMLVideoElement) => HTMLVideoElement | HTMLCanvasElement) | null>(null);
 
   useEffect(() => {
     if (!enabled) {
@@ -96,6 +114,7 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
       const statusChanged = nextStatus !== currentStatus;
       currentStatus = nextStatus;
       setStatus(nextStatus);
+      if (analysisRef.current === "off") return; // 표정 관찰에 동의하지 않았으면 아무것도 보내지 않는다
       const now = Date.now();
       if (!force && !statusChanged && now - lastReportAt < REPORT_INTERVAL_MS) return;
       lastReportAt = now;
@@ -131,10 +150,16 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
       return canvas;
     }
 
+    correctedFrameRef.current = correctedFrame;
+
     function tick() {
       if (cancelled) return;
       const video = videoRef.current;
-      if (video && landmarker && video.readyState >= 2 && video.videoWidth > 0) {
+      if (analysisRef.current !== "on") {
+        // 알약 확인 중: 카메라는 켜 둔 채 표정 분석만 멈춘다
+        if (analysisRef.current === "paused") report("paused");
+        else setStatus(currentStatus = "paused");
+      } else if (video && landmarker && video.readyState >= 2 && video.videoWidth > 0) {
         const timeMs = performance.now();
         const result = landmarker.detectForVideo(correctedFrame(video), timeMs);
         const landmarks = result.faceLandmarks[0];
@@ -205,7 +230,7 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
         if (!cancelled) report(cameraErrorStatus(error), true);
         return;
       }
-      report("calibrating", true);
+      if (analysisRef.current === "on") report("calibrating", true);
       tick();
     }
 
@@ -213,11 +238,12 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
 
     return () => {
       cancelled = true;
+      correctedFrameRef.current = null;
       if (timer) clearTimeout(timer);
       stream?.getTracks().forEach((track) => track.stop());
       landmarker?.close();
     };
   }, [enabled, patientId, onMouthStatus]);
 
-  return { videoRef, status, previewFilter };
+  return { videoRef, status, previewFilter, correctedFrame: correctedFrameRef };
 }

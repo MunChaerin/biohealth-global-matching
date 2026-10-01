@@ -43,7 +43,7 @@ describe("PatientChat", () => {
   });
 
   it("adds the patient message and displays the chatbot response", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse(normalOutput));
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse(normalOutput));
     render(<PatientChat />);
 
     await send("허리가 아파요.");
@@ -97,7 +97,7 @@ describe("PatientChat", () => {
       onerror: (() => void) | null = null;
       constructor(public text: string) {}
     });
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({
       ...normalOutput,
       speechText: "화면 답변과 다른 낭독 문장",
     }));
@@ -117,13 +117,13 @@ describe("PatientChat", () => {
     await send("허리가 아파요.");
     expect(screen.getByRole("button", { name: "전송 중" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "전송 중" }));
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/chat")).toHaveLength(1);
 
     await act(async () => resolveRequest(jsonResponse(normalOutput)));
   });
 
   it("shows a friendly API error", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({ error: "server error" }, 500));
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({ error: "server error" }, 500));
     render(<PatientChat />);
 
     await send("허리가 아파요.");
@@ -135,7 +135,7 @@ describe("PatientChat", () => {
     ["SAFETY_HOLD" as const, "continue" as const],
     ["SYMPTOM_DETAIL" as const, "handoff" as const],
   ])("shows safety guidance for %s or %s", async (conversationState, sessionAction) => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({
       ...normalOutput,
       patientReply: "의료진에게 연결하겠습니다.",
       conversationState,
