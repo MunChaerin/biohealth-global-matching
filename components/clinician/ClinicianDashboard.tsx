@@ -71,8 +71,24 @@ export function ClinicianDashboard() {
 
   useEffect(() => {
     const updateCall = async () => {
-      const response = await fetch(`/api/care/call?patientId=${selectedPersona.id}`, { cache: "no-store" });
-      if (response.ok) setCallStatus(((await response.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null);
+      let localRequested = false;
+      try {
+        const raw = window.localStorage.getItem("carelink.careCall");
+        if (raw) {
+          const localCall = JSON.parse(raw) as { patientId?: string; status?: "requested" | "acknowledged" };
+          localRequested = localCall.patientId === selectedPersona.id && localCall.status === "requested";
+          if (localRequested) setCallStatus("requested");
+        }
+      } catch { /* 서버 상태를 사용 */ }
+      try {
+        const response = await fetch(`/api/care/call?patientId=${selectedPersona.id}&t=${Date.now()}`, { cache: "no-store" });
+        if (response.ok) {
+          const serverStatus = ((await response.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null;
+          setCallStatus(serverStatus ?? (localRequested ? "requested" : null));
+        }
+      } catch {
+        if (localRequested) setCallStatus("requested");
+      }
     };
     void updateCall();
     const interval = window.setInterval(updateCall, 1500);
