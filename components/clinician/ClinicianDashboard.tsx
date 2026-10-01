@@ -105,6 +105,11 @@ export function ClinicianDashboard() {
     setAcknowledgedAlerts((current) => current.includes(id) ? current : [...current, id]);
   }
 
+  function openRecord(target: "panel" | "soap") {
+    setShowRecords(false);
+    window.setTimeout(() => document.querySelector("." + styles[target])?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
+  }
+
   const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length + (callStatus === "requested" && !acknowledgedAlerts.includes("call") ? 1 : 0);
 
   return (
@@ -141,7 +146,7 @@ export function ClinicianDashboard() {
           {callStatus === "requested" && !acknowledgedAlerts.includes("call") ? <article className={`${styles.priorityCard} ${styles.alert}`}><span className={styles.priorityIcon}>!</span><div><strong>환자가 의료진을 호출했습니다</strong><p>환자 화면의 도움 요청을 확인해 주세요.</p><button type="button" onClick={() => { acknowledgeAlert("call"); void acknowledgeCall(); }}>확인 처리</button></div><time>지금</time></article> : null}
           {priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.id}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p><button type="button" className={styles.alertConfirm} onClick={() => acknowledgeAlert(item.id)}>확인</button></div><time>{item.time}</time></article>)}
         </div>
-        {showRecords ? <div className={styles.recordDetails} role="region" aria-label="확인할 기록 상세"><button type="button" onClick={() => document.querySelector("." + styles.panel)?.scrollIntoView({ behavior: "smooth" })}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => document.querySelector("." + styles.soap)?.scrollIntoView({ behavior: "smooth" })}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button>{callStatus === "requested" ? <button type="button" onClick={() => void acknowledgeCall()}><b>의료진 호출</b><span>환자의 도움 요청을 확인 처리합니다. ›</span></button> : null}</div> : null}
+        {showRecords ? <div className={styles.recordModalBackdrop} role="presentation" onClick={() => setShowRecords(false)}><section className={styles.recordModal} role="dialog" aria-modal="true" aria-labelledby="record-modal-title" onClick={(event) => event.stopPropagation()}><div className={styles.recordModalHeader}><div><p>REVIEW RECORDS</p><h2 id="record-modal-title">확인할 기록</h2><span>환자 상태를 확인할 항목을 선택해 주세요.</span></div><button type="button" className={styles.modalClose} aria-label="기록 창 닫기" onClick={() => setShowRecords(false)}>×</button></div><div className={styles.recordDetails}><button type="button" onClick={() => openRecord("panel")}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => openRecord("soap")}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button>{callStatus === "requested" ? <button type="button" onClick={() => { setShowRecords(false); acknowledgeAlert("call"); void acknowledgeCall(); }}><b>의료진 호출</b><span>환자의 도움 요청을 확인 처리합니다. ›</span></button> : null}</div></section></div> : null}
       </section>
 
       <section className={styles.dashboardGrid}>
