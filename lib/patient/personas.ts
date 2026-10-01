@@ -31,7 +31,7 @@ export const patientPersonas: PatientPersona[] = [
     summary: "뇌경색 후 우측 편마비와 우측 하지 저림을 관찰 중인 환자",
     diagnosis: "뇌경색 좌측 MCA 영역 · 우측 편마비 · 제2형 당뇨 · MCI 의심",
     symptoms: "우측 하지 저림, 수면 저하, 경도 실어증",
-    medications: "암로디핀 · 메트포르민 · 클로피도그렐",
+    medications: "리리베아캡슐 50mg(프레가발린, 아침) · 타이레놀정 500mg(아세트아미노펜, 저녁)",
     greeting: "오늘 오른쪽 다리와 몸 상태는 어떠세요?",
     japaneseGreeting: "今日、右足や体の具合はいかがですか？",
     quickReplies: ["오른쪽 다리가 저릿해요", "잠을 잘 못 잤어요", "괜찮은 편이에요"],
