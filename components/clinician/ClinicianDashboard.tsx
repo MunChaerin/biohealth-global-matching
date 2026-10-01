@@ -10,8 +10,8 @@ import { createConversationObservation } from "../../lib/chatbot/observation";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
-  { tone: "observe", label: "체위 변경 권장", detail: "동일 체위 유지 시간이 2시간을 넘었습니다.", time: "09:05" },
-  { tone: "soft", label: "수면 경과 확인", detail: "지난밤 중간 각성 1회가 기록되었습니다.", time: "09:13" },
+  { id: "position", tone: "observe", label: "체위 변경 권장", detail: "동일 체위 유지 시간이 2시간을 넘었습니다.", time: "09:05" },
+  { id: "sleep", tone: "soft", label: "수면 경과 확인", detail: "지난밤 중간 각성 1회가 기록되었습니다.", time: "09:13" },
 ];
 
 const days = [
@@ -21,8 +21,8 @@ const days = [
 const emptySoap: SoapDraft = {
   subjective: "환자 대화 정보가 아직 수집되지 않았습니다.",
   subjectiveMeta: "대화 0회",
-  objective: "현재 실제 카메라·센서·모션 값은 아직 연결되지 않았습니다.",
-  objectiveMeta: "O 데이터 소스 연동 대기",
+  objective: "환자 대화가 시작되면 환자 시나리오 기반 참고값과 카메라 관찰을 표시합니다.",
+  objectiveMeta: "시나리오 참고값 · 실제 센서 연동 전",
   assessment: "대화가 시작되면 참고 제안을 생성합니다.",
   assessmentMeta: "대기 중",
   plan: "의료진이 최종 계획을 입력합니다.",
@@ -39,6 +39,9 @@ export function ClinicianDashboard() {
   const [explanation, setExplanation] = useState("");
   const [explanationSent, setExplanationSent] = useState(false);
   const [showRecords, setShowRecords] = useState(false);
+  const [acknowledgedAlerts, setAcknowledgedAlerts] = useState<string[]>([]);
+  const [conversation, setConversation] = useState<ChatbotContext["messages"]>([]);
+  const [showConversation, setShowConversation] = useState(false);
   const [observation, setObservation] = useState(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: "", patientId: "" }));
   const planEditedRef = useRef(false);
 
@@ -52,6 +55,7 @@ export function ClinicianDashboard() {
         const next = createSoapDraft(payload.context);
         setSoap(next);
         setObservation(createConversationObservation(payload.context));
+        setConversation(payload.context.messages);
         if (!planEditedRef.current) setPlan(next.plan);
         if (!explanationSent) setExplanation(next.assessment);
       } catch {
@@ -92,9 +96,16 @@ export function ClinicianDashboard() {
   }
 
   async function sendExplanation() {
-    const response = await fetch("/api/care/explanation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: getChatSessionId(selectedPersona.id), text: explanation, language: "ko" }) });
-    if (response.ok) setExplanationSent(true);
+    const text = explanation.trim() || `${selectedPersona.name} 어르신, 현재 상태를 확인하고 있습니다. ${soap.assessment}`;
+    const response = await fetch("/api/care/explanation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: getChatSessionId(selectedPersona.id), text, language: "ko" }) });
+    if (response.ok) { setExplanation(text); setExplanationSent(true); }
   }
+
+  function acknowledgeAlert(id: string) {
+    setAcknowledgedAlerts((current) => current.includes(id) ? current : [...current, id]);
+  }
+
+  const visiblePriorityCount = priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).length + (callStatus === "requested" && !acknowledgedAlerts.includes("call") ? 1 : 0);
 
   return (
     <main className={styles.page}>
@@ -125,10 +136,10 @@ export function ClinicianDashboard() {
       </div>
 
       <section className={styles.prioritySection}>
-        <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><button className={styles.recordToggle} type="button" onClick={() => setShowRecords((value) => !value)}>확인할 기록 {callStatus === "requested" ? 3 : 2}건 {showRecords ? "⌃" : "›"}</button></div>
+        <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><button className={styles.recordToggle} type="button" onClick={() => setShowRecords((value) => !value)}>확인할 기록 {visiblePriorityCount}건 {showRecords ? "⌃" : "›"}</button></div>
         <div className={styles.priorityGrid}>
-          {callStatus === "requested" ? <article className={`${styles.priorityCard} ${styles.alert}`}><span className={styles.priorityIcon}>!</span><div><strong>환자가 의료진을 호출했습니다</strong><p>환자 화면의 도움 요청을 확인해 주세요.</p><button type="button" onClick={() => void acknowledgeCall()}>확인 처리</button></div><time>지금</time></article> : null}
-          {priorities.map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.label}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p></div><time>{item.time}</time></article>)}
+          {callStatus === "requested" && !acknowledgedAlerts.includes("call") ? <article className={`${styles.priorityCard} ${styles.alert}`}><span className={styles.priorityIcon}>!</span><div><strong>환자가 의료진을 호출했습니다</strong><p>환자 화면의 도움 요청을 확인해 주세요.</p><button type="button" onClick={() => { acknowledgeAlert("call"); void acknowledgeCall(); }}>확인 처리</button></div><time>지금</time></article> : null}
+          {priorities.filter((item) => !acknowledgedAlerts.includes(item.id)).map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.id}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p><button type="button" className={styles.alertConfirm} onClick={() => acknowledgeAlert(item.id)}>확인</button></div><time>{item.time}</time></article>)}
         </div>
         {showRecords ? <div className={styles.recordDetails} role="region" aria-label="확인할 기록 상세"><button type="button" onClick={() => document.querySelector("." + styles.panel)?.scrollIntoView({ behavior: "smooth" })}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => document.querySelector("." + styles.soap)?.scrollIntoView({ behavior: "smooth" })}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button>{callStatus === "requested" ? <button type="button" onClick={() => void acknowledgeCall()}><b>의료진 호출</b><span>환자의 도움 요청을 확인 처리합니다. ›</span></button> : null}</div> : null}
       </section>
@@ -137,11 +148,11 @@ export function ClinicianDashboard() {
         <article className={styles.panel}>
           <div className={styles.panelHeading}><div><p>OBJECTIVE SIGNALS · MOCK</p><h2>생체신호 · 모션</h2></div><span className={styles.badge}>연동 전 목업</span></div>
           <div className={styles.metrics}>
-            <div><span>맥박</span><strong>미연동</strong><em>센서 대기</em></div>
-            <div><span>SpO₂</span><strong>미연동</strong><em>센서 대기</em></div>
-            <div><span>ECG</span><strong>미연동</strong><em>센서 대기</em></div>
+            <div><span>맥박</span><strong>{selectedPersona.demoVitals.heartRate} <small>bpm</small></strong><em>시나리오 값</em></div>
+            <div><span>SpO₂</span><strong>{selectedPersona.demoVitals.spo2} <small>%</small></strong><em>시나리오 값</em></div>
+            <div><span>ECG</span><strong>정상 <small>동성 리듬</small></strong><em>시나리오 값</em></div>
           </div>
-          <div className={styles.motion}><div><span>체위·모션 추적</span><strong>2시간 6분 동일 체위</strong></div><div className={styles.timeline}><i /><i /><i /><i /></div><div className={styles.timelineLabels}><span>07:00</span><span>08:00</span><span>09:00</span><span>현재</span></div></div>
+          <div className={styles.motion}><div><span>체위·모션 추적</span><strong>{selectedPersona.demoVitals.motion}</strong></div><div className={styles.timeline}><i /><i /><i /><i /></div><div className={styles.timelineLabels}><span>07:00</span><span>08:00</span><span>09:00</span><span>현재</span></div><small className={styles.demoNote}>{selectedPersona.demoVitals.note}</small></div>
           <button className={styles.textButton} type="button">원시 센서 기록 보기 ›</button>
         </article>
 
@@ -151,6 +162,10 @@ export function ClinicianDashboard() {
           <div className={styles.legend}><span><i /> 안정 <b>주요 표현</b></span><span><i /> 보통 <b>혼재</b></span><span><i /> 관찰 <b>확인 필요</b></span></div>
           <div className={styles.insight}>○ <span>{observation.detail} {observation.evidence !== "환자 발화 없음" ? `최근 발화: “${observation.evidence}”` : ""}</span></div>
           <FacialObservation patientId={selectedPersona.id} />
+          <div className={styles.conversationLog}>
+            <button type="button" className={styles.conversationToggle} onClick={() => setShowConversation((value) => !value)}>{showConversation ? "대화 기록 닫기" : "환자 챗봇 대화 보기"} <span>{conversation.filter((item) => item.role === "patient").length}회</span></button>
+            {showConversation ? <div className={styles.conversationMessages} aria-label="환자 챗봇 대화 기록"><small>환자 상태 확인과 의료진 검토를 위한 대화 기록입니다.</small>{conversation.length ? conversation.slice(-8).map((item, index) => <p className={item.role === "patient" ? styles.patientMessage : styles.assistantMessage} key={`${item.createdAt}-${index}`}><b>{item.role === "patient" ? "환자" : "CareLink"}</b>{item.text}</p>) : <small>아직 대화 기록이 없습니다.</small>}</div> : null}
+          </div>
         </article>
       </section>
 

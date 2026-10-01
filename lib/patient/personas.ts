@@ -12,6 +12,13 @@ export interface PatientPersona {
   japaneseGreeting: string;
   quickReplies: string[];
   japaneseQuickReplies: string[];
+  demoVitals: {
+    heartRate: number;
+    spo2: number;
+    ecg: string;
+    motion: string;
+    note: string;
+  };
 }
 
 export const patientPersonas: PatientPersona[] = [
@@ -29,6 +36,7 @@ export const patientPersonas: PatientPersona[] = [
     japaneseGreeting: "今日、右足や体の具合はいかがですか？",
     quickReplies: ["오른쪽 다리가 저릿해요", "잠을 잘 못 잤어요", "괜찮은 편이에요"],
     japaneseQuickReplies: ["右足がしびれます", "よく眠れませんでした", "大丈夫です"],
+    demoVitals: { heartRate: 78, spo2: 97, ecg: "정상 동성 리듬", motion: "우측 활동량 감소", note: "뇌경색 후 편마비 시나리오 참고값" },
   },
   {
     id: "kim-sunja",
@@ -44,6 +52,7 @@ export const patientPersonas: PatientPersona[] = [
     japaneseGreeting: "今日は体を動かすとき、つらいことがありましたか？",
     quickReplies: ["엉덩이가 아파요", "넘어질까 봐 무서워요", "기운이 없어요"],
     japaneseQuickReplies: ["股関節が痛いです", "転ぶのが怖いです", "元気が出ません"],
+    demoVitals: { heartRate: 82, spo2: 96, ecg: "정상 동성 리듬", motion: "보행 보조기 사용", note: "고관절 수술 후 재활 시나리오 참고값" },
   },
   {
     id: "sato-kenji",
@@ -59,6 +68,7 @@ export const patientPersonas: PatientPersona[] = [
     japaneseGreeting: "今日の動きや呼吸は、いつもと比べていかがですか？",
     quickReplies: ["손이 떨려요", "숨이 조금 차요", "움직임이 느려졌어요"],
     japaneseQuickReplies: ["手が震えます", "少し息苦しいです", "動きが遅くなりました"],
+    demoVitals: { heartRate: 88, spo2: 94, ecg: "정상 동성 리듬", motion: "떨림·느린 움직임", note: "파킨슨병·COPD 시나리오 참고값" },
   },
 ];
 
