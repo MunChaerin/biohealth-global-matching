@@ -9,10 +9,8 @@ import { SafetyNotice } from "./SafetyNotice";
 import { usePatientChat } from "./usePatientChat";
 import { useSpeech } from "./useSpeech";
 import type { ChatLanguage } from "../../lib/chatbot/types";
+import { getPatientPersona } from "../../lib/patient/personas";
 import styles from "./patient-chat.module.css";
-
-const quickReplies = ["허리가 조금 불편해요", "기분은 괜찮아요", "창밖을 보고 싶어요"];
-const japaneseQuickReplies = ["腰が少しつらいです", "気分は大丈夫です", "窓の外を見たいです"];
 
 function localizeInitialMessage(text: string, language: ChatLanguage): string {
   if (language === "ja" && text === "오늘 가장 불편한 점은 무엇인가요?") return "今日、いちばんつらいことは何ですか？";
@@ -21,7 +19,12 @@ function localizeInitialMessage(text: string, language: ChatLanguage): string {
 }
 
 export function PatientChat() {
-  const { context, error, isComplete, isLoading, safetyHold, finishSession, sendMessage, setLanguage } = usePatientChat();
+  const [personaId, setPersonaId] = useState<string | null>(null);
+  useEffect(() => {
+    setPersonaId(new URLSearchParams(window.location.search).get("personaId"));
+  }, []);
+  const persona = getPatientPersona(personaId);
+  const { context, error, isComplete, isLoading, safetyHold, finishSession, sendMessage, setLanguage } = usePatientChat(persona);
   const speech = useSpeech(context.language ?? "ko");
   const endRef = useRef<HTMLDivElement>(null);
   const [isCalling, setIsCalling] = useState(false);
@@ -29,9 +32,9 @@ export function PatientChat() {
   const language = context.language ?? "ko";
   const isJapanese = language === "ja";
   const copy = isJapanese
-    ? { kicker: "今日のケア対話", title: "ジョンヒさん、おはようございます。", subtitle: "ゆっくりお話しください。今日のお気持ちはいかがですか？", notice: "日本語でお話ししています。音声入力も使えます。", assistant: "こころのケア友だち", listening: "一緒に聞いています", quick: "今の気持ちに近い言葉を選んでください。", soap: "SOAPの下書きを作成しました", soapHelp: "医療スタッフが確認して最終判断します。", placeholder: "つらいことをゆっくり話してください。", patient: "患者画面", clinician: "医療スタッフ画面", review: "医療スタッフの確認をサポート", language: "言語 ·", enlarge: "文字を大きく", voice: "◖ 音声で聞く", loading: "回答を確認しています...", assist: "◌　発音が不明瞭なときは", stt: "STT音声入力補助", assistEnd: "が一緒に働きます。", moodLabel: "今日の対話観察", moodTitle: "安心した表現が多くありました", tired: "少し疲れ", calm: "安心", moodHint: "最近の対話で観察された表現をまとめた参考情報です。", help: "お手伝いが必要ですか？", helpHint: "担当の医療スタッフにすぐ知らせます。", call: "医療スタッフを呼ぶ", called: "依頼を伝えました", callConfirm: "担当の医療スタッフに助けを求めました。", medicine: "次のお薬", medicineName: "午前の血圧の薬", medicineTime: "午前10:00 · 白い楕円形", medicineHint: "カメラで薬の形を確認できます。", taken: "飲みました", takenDone: "✓ 服薬を確認", planLabel: "今日の説明", planTitle: "医療スタッフが分かりやすく説明します", planText: "ジョンヒさん、今日は姿勢を一度変えて、夕方に腰のつらさと睡眠をもう一度確認しましょう。", listen: "音声で聞く　›", soapLink: "医療スタッフ画面で確認 ›", footer: "ⓘ 健康状態の表示はケアのための参考情報であり、診断や緊急判断に代わるものではありません。" }
-    : { kicker: "오늘의 돌봄 대화", title: "정희 어르신, 좋은 아침이에요.", subtitle: "천천히 말씀하셔도 괜찮아요. 오늘 기분은 어떠세요?", notice: "한국어로 대화하고 있어요. 음성 입력도 사용할 수 있어요.", assistant: "마음 돌봄 친구", listening: "함께 듣고 있어요", quick: "지금 마음에 가까운 말을 골라 보세요.", soap: "SOAP 초안을 작성했어요", soapHelp: "의료진이 확인한 뒤 최종 판단합니다.", placeholder: "불편한 점을 편하게 말씀해 주세요.", patient: "환자 화면", clinician: "의료진 화면", review: "의료진 검토 보조", language: "언어 ·", enlarge: "글자 크게", voice: "◖ 음성으로 듣기", loading: "답변을 확인하고 있어요...", assist: "◌　발음이 불분명할 때는", stt: "STT 음성 입력 보조", assistEnd: "가 함께 작동해요.", moodLabel: "오늘의 대화 관찰", moodTitle: "편안한 표현이 많았어요", tired: "조금 지침", calm: "편안함", moodHint: "최근 대화에서 관찰된 표현을 정리한 참고 정보예요.", help: "도움이 필요하세요?", helpHint: "담당 의료진에게 바로 알려드려요.", call: "의료진 부르기", called: "요청을 알렸어요", callConfirm: "담당 의료진에게 도움 요청을 알렸어요.", medicine: "다음 약 복용", medicineName: "오전 혈압약", medicineTime: "오전 10:00 · 흰색 타원형", medicineHint: "카메라로 알약 모양을 확인할 수 있어요.", taken: "복용했어요", takenDone: "✓ 복용 확인", planLabel: "오늘의 설명", planTitle: "의료진이 쉽게 알려드려요", planText: "정희 어르신, 오늘은 자세를 한 번 바꿔 드리고 저녁에 허리 불편감과 잠을 다시 살펴볼게요.", listen: "음성으로 듣기　›", soapLink: "의료진 화면에서 확인 ›", footer: "ⓘ 건강 상태 표시는 돌봄을 돕기 위한 참고 정보이며, 진단이나 응급 판단을 대신하지 않습니다." };
-  const replies = isJapanese ? japaneseQuickReplies : quickReplies;
+    ? { kicker: "今日のケア対話", title: `${persona.japaneseName}さん、おはようございます。`, subtitle: persona.japaneseGreeting, notice: "日本語でお話ししています。音声入力も使えます。", assistant: "こころのケア友だち", listening: "一緒に聞いています", quick: "今の気持ちに近い言葉を選んでください。", soap: "SOAPの下書きを作成しました", soapHelp: "医療スタッフが確認して最終判断します。", placeholder: "つらいことをゆっくり話してください。", patient: "患者画面", clinician: "医療スタッフ画面", review: "医療スタッフの確認をサポート", language: "言語 ·", enlarge: "文字を大きく", voice: "◖ 音声で聞く", loading: "回答を確認しています...", assist: "◌　発音が不明瞭なときは", stt: "STT音声入力補助", assistEnd: "が一緒に働きます。", moodLabel: "今日の対話観察", moodTitle: "安心した表現が多くありました", tired: "少し疲れ", calm: "安心", moodHint: "最近の対話で観察された表現をまとめた参考情報です。", help: "お手伝いが必要ですか？", helpHint: "担当の医療スタッフにすぐ知らせます。", call: "医療スタッフを呼ぶ", called: "依頼を伝えました", callConfirm: "担当の医療スタッフに助けを求めました。", medicine: "次のお薬", medicineName: "午前の薬", medicineTime: "服薬予定を確認してください", medicineHint: "服薬情報は医療スタッフの確認用です。", taken: "飲みました", takenDone: "✓ 服薬を確認", planLabel: "今日の説明", planTitle: "医療スタッフが分かりやすく説明します", planText: `${persona.japaneseName}さん、今日の体調について医療スタッフが確認します。`, listen: "音声で聞く　›", soapLink: "医療スタッフ画面で確認 ›", footer: "ⓘ 健康状態の表示はケアのための参考情報であり、診断や緊急判断に代わるものではありません。" }
+    : { kicker: "오늘의 돌봄 대화", title: `${persona.name} 어르신, 좋은 아침이에요.`, subtitle: persona.greeting, notice: "한국어로 대화하고 있어요. 음성 입력도 사용할 수 있어요.", assistant: "마음 돌봄 친구", listening: "함께 듣고 있어요", quick: "지금 마음에 가까운 말을 골라 보세요.", soap: "SOAP 초안을 작성했어요", soapHelp: "의료진이 확인한 뒤 최종 판단합니다.", placeholder: "불편한 점을 편하게 말씀해 주세요.", patient: "환자 화면", clinician: "의료진 화면", review: "의료진 검토 보조", language: "언어 ·", enlarge: "글자 크게", voice: "◖ 음성으로 듣기", loading: "답변을 확인하고 있어요...", assist: "◌　발음이 불분명할 때는", stt: "STT 음성 입력 보조", assistEnd: "가 함께 작동해요.", moodLabel: "오늘의 대화 관찰", moodTitle: "대화 관찰을 준비하고 있어요", tired: "확인 중", calm: "참고", moodHint: `${persona.summary}. 대화와 센서 정보가 쌓이면 갱신됩니다.`, help: "도움이 필요하세요?", helpHint: "담당 의료진에게 바로 알려드려요.", call: "의료진 부르기", called: "요청을 알렸어요", callConfirm: "담당 의료진에게 도움 요청을 알렸어요.", medicine: "복용 약물", medicineName: persona.medications, medicineTime: `${persona.age}세 · ${persona.room}`, medicineHint: persona.symptoms, taken: "복용했어요", takenDone: "✓ 복용 확인", planLabel: "오늘의 설명", planTitle: "의료진이 쉽게 알려드려요", planText: `${persona.name} 어르신, 오늘 상태를 의료진이 확인하고 쉬운 설명으로 알려드릴게요.`, listen: "음성으로 듣기　›", soapLink: "의료진 화면에서 확인 ›", footer: "ⓘ 건강 상태 표시는 돌봄을 돕기 위한 참고 정보이며, 진단이나 응급 판단을 대신하지 않습니다." };
+  const replies = isJapanese ? persona.japaneseQuickReplies : persona.quickReplies;
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });

@@ -68,6 +68,8 @@ export interface ChatbotContext {
   safetyFlags: SafetyFlag[];
   consentGiven?: boolean;
   language?: ChatLanguage;
+  personaId?: string;
+  personaSummary?: string;
 }
 
 export interface ChatMessage {

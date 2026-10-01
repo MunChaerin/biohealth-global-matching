@@ -1,6 +1,8 @@
 import type { ChatbotContext, SubjectiveData } from "./types";
 
-export const DEMO_CHAT_SESSION_ID = "demo-patient-session";
+export function getChatSessionId(personaId: string): string {
+  return `demo-${personaId}`;
+}
 
 export interface SoapDraft {
   subjective: string;

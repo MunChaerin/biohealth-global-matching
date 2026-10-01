@@ -3,8 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { FacialObservation } from "./FacialObservation";
-import { createSoapDraft, DEMO_CHAT_SESSION_ID, type SoapDraft } from "../../lib/chatbot/soapDraft";
+import { createSoapDraft, getChatSessionId, type SoapDraft } from "../../lib/chatbot/soapDraft";
 import type { ChatbotContext } from "../../lib/chatbot/types";
+import { defaultPersona, getPatientPersona, patientPersonas } from "../../lib/patient/personas";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
@@ -29,6 +30,8 @@ const emptySoap: SoapDraft = {
 };
 
 export function ClinicianDashboard() {
+  const [selectedPersonaId, setSelectedPersonaId] = useState(defaultPersona.id);
+  const selectedPersona = getPatientPersona(selectedPersonaId);
   const [soap, setSoap] = useState<SoapDraft>(emptySoap);
   const [plan, setPlan] = useState(emptySoap.plan);
   const planEditedRef = useRef(false);
@@ -36,7 +39,7 @@ export function ClinicianDashboard() {
   useEffect(() => {
     const update = async () => {
       try {
-        const response = await fetch(`/api/chat/session?sessionId=${DEMO_CHAT_SESSION_ID}`, { cache: "no-store" });
+        const response = await fetch(`/api/chat/session?sessionId=${getChatSessionId(selectedPersona.id)}`, { cache: "no-store" });
         if (!response.ok) return;
         const payload = (await response.json()) as { context?: ChatbotContext | null };
         if (!payload.context) return;
@@ -52,7 +55,7 @@ export function ClinicianDashboard() {
     return () => {
       window.clearInterval(interval);
     };
-  }, []);
+  }, [selectedPersona.id]);
 
   return (
     <main className={styles.page}>
@@ -63,14 +66,17 @@ export function ClinicianDashboard() {
         </Link>
         <div className={styles.topbarActions}>
           <span className={styles.updated}>오늘 09:18 업데이트</span>
-          <Link className={styles.patientLink} href="/patient">환자 화면</Link>
+          <select aria-label="환자 선택" value={selectedPersona.id} onChange={(event) => setSelectedPersonaId(event.target.value)}>
+            {patientPersonas.map((persona) => <option key={persona.id} value={persona.id}>{persona.name} · {persona.age}세</option>)}
+          </select>
+          <Link className={styles.patientLink} href={`/patient?personaId=${selectedPersona.id}`}>환자 화면</Link>
         </div>
       </header>
 
       <section className={styles.patientHeader}>
-        <div className={styles.patientIdentity}>
+          <div className={styles.patientIdentity}>
           <span className={styles.patientAvatar}>정</span>
-          <div><p>담당 환자 · 실시간 요약</p><h1>김정희 <small>82세</small></h1><span>햇살관 203호 · 장기요양 2등급</span></div>
+          <div><p>담당 환자 · 실시간 요약</p><h1>{selectedPersona.name} <small>{selectedPersona.age}세</small></h1><span>{selectedPersona.room} · {selectedPersona.diagnosis}</span></div>
         </div>
         <button className={styles.roundButton} type="button">오늘 회진</button>
       </section>
