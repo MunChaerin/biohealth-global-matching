@@ -66,12 +66,12 @@ export function usePatientChat() {
     setError(null);
 
     const patientMessage = message("patient", patientText);
+    const previousContext = contextRef.current;
     const requestContext = {
-      ...contextRef.current,
+      ...previousContext,
       messages: [...contextRef.current.messages, patientMessage],
     };
     commit(requestContext);
-
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -97,7 +97,9 @@ export function usePatientChat() {
       commit(nextContext);
       setSessionAction(output.sessionAction);
       return output;
-    } catch {
+    } catch (error) {
+      console.error("chat request failed", error);
+      commit(previousContext);
       setError("잠시 연결이 원활하지 않습니다. 잠시 후 다시 말씀해 주세요.");
       return undefined;
     } finally {

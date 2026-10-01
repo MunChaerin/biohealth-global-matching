@@ -82,6 +82,7 @@ export function useSpeech() {
     };
     recognition.onerror = (event) => setSpeechError(recognitionErrorMessage(event.error));
     recognition.onend = () => {
+      if (recognitionRef.current !== recognition) return;
       recognitionRef.current = null;
       setIsListening(false);
     };
