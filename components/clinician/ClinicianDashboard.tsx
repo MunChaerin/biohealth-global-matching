@@ -38,6 +38,7 @@ export function ClinicianDashboard() {
   const [callStatus, setCallStatus] = useState<"requested" | "acknowledged" | null>(null);
   const [explanation, setExplanation] = useState("");
   const [explanationSent, setExplanationSent] = useState(false);
+  const [showRecords, setShowRecords] = useState(false);
   const [observation, setObservation] = useState(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: "", patientId: "" }));
   const planEditedRef = useRef(false);
 
@@ -71,12 +72,23 @@ export function ClinicianDashboard() {
     };
     void updateCall();
     const interval = window.setInterval(updateCall, 1500);
-    return () => window.clearInterval(interval);
+    const onStorage = (event: StorageEvent) => {
+      if (event.key !== "carelink.careCall" || !event.newValue) return;
+      try {
+        const value = JSON.parse(event.newValue) as { patientId?: string; status?: "requested" | "acknowledged" };
+        if (value.patientId === selectedPersona.id && value.status === "requested") setCallStatus("requested");
+      } catch { /* 서버 polling으로 계속 확인 */ }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => { window.clearInterval(interval); window.removeEventListener("storage", onStorage); };
   }, [selectedPersona.id]);
 
   async function acknowledgeCall() {
     const response = await fetch("/api/care/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: selectedPersona.id, action: "acknowledge" }) });
-    if (response.ok) setCallStatus("acknowledged");
+    if (response.ok) {
+      setCallStatus("acknowledged");
+      try { window.localStorage.setItem("carelink.careCall", JSON.stringify({ patientId: selectedPersona.id, status: "acknowledged", at: Date.now() })); } catch { /* 서버 상태는 저장됨 */ }
+    }
   }
 
   async function sendExplanation() {
@@ -113,16 +125,17 @@ export function ClinicianDashboard() {
       </div>
 
       <section className={styles.prioritySection}>
-        <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><span>확인할 기록 {callStatus === "requested" ? 3 : 2}건 ›</span></div>
+        <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><button className={styles.recordToggle} type="button" onClick={() => setShowRecords((value) => !value)}>확인할 기록 {callStatus === "requested" ? 3 : 2}건 {showRecords ? "⌃" : "›"}</button></div>
         <div className={styles.priorityGrid}>
           {callStatus === "requested" ? <article className={`${styles.priorityCard} ${styles.alert}`}><span className={styles.priorityIcon}>!</span><div><strong>환자가 의료진을 호출했습니다</strong><p>환자 화면의 도움 요청을 확인해 주세요.</p><button type="button" onClick={() => void acknowledgeCall()}>확인 처리</button></div><time>지금</time></article> : null}
           {priorities.map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.label}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p></div><time>{item.time}</time></article>)}
         </div>
+        {showRecords ? <div className={styles.recordDetails} role="region" aria-label="확인할 기록 상세"><button type="button" onClick={() => document.querySelector("." + styles.panel)?.scrollIntoView({ behavior: "smooth" })}><b>대화·표정 관찰</b><span>최근 환자 발화와 카메라 관찰 결과를 확인합니다. ›</span></button><button type="button" onClick={() => document.querySelector("." + styles.soap)?.scrollIntoView({ behavior: "smooth" })}><b>SOAP 초안</b><span>수집된 S 정보와 의료진 검토 내용을 확인합니다. ›</span></button>{callStatus === "requested" ? <button type="button" onClick={() => void acknowledgeCall()}><b>의료진 호출</b><span>환자의 도움 요청을 확인 처리합니다. ›</span></button> : null}</div> : null}
       </section>
 
       <section className={styles.dashboardGrid}>
         <article className={styles.panel}>
-          <div className={styles.panelHeading}><div><p>OBJECTIVE SIGNALS</p><h2>생체신호 · 모션</h2></div><span className={styles.badge}>현재 기록</span></div>
+          <div className={styles.panelHeading}><div><p>OBJECTIVE SIGNALS · MOCK</p><h2>생체신호 · 모션</h2></div><span className={styles.badge}>연동 전 목업</span></div>
           <div className={styles.metrics}>
             <div><span>맥박</span><strong>미연동</strong><em>센서 대기</em></div>
             <div><span>SpO₂</span><strong>미연동</strong><em>센서 대기</em></div>

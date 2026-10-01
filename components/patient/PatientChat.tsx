@@ -55,7 +55,10 @@ export function PatientChat() {
 
   async function callClinician() {
     const response = await fetch("/api/care/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: persona.id, sessionId: context.sessionId }) });
-    if (response.ok) setCallStatus("requested");
+    if (response.ok) {
+      setCallStatus("requested");
+      try { window.localStorage.setItem("carelink.careCall", JSON.stringify({ patientId: persona.id, status: "requested", at: Date.now() })); } catch { /* 서버 동기화로 동작 */ }
+    }
   }
 
   useEffect(() => {
