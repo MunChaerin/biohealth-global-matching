@@ -20,9 +20,9 @@ export interface MotionReport {
 }
 
 export const MOTION_THRESHOLDS: MotionThresholds = {
-  absenceSeconds: 30,
-  lowMovementSeconds: 60,
-  stillSeconds: 3 * 60,
+  absenceSeconds: 5,
+  lowMovementSeconds: 10,
+  stillSeconds: 20,
 } as const;
 
 // 자리 비움은 화장실·검사·외출 등 정상적인 상황일 수 있으므로 자동 알림을 보내지 않는다.

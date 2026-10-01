@@ -11,8 +11,8 @@ const fastThresholds = { absenceSeconds: 10, lowMovementSeconds: 20, stillSecond
 const statusCopy: Record<MotionStatus, { label: string; detail: string; tone: string }> = {
   present: { label: "정상 감지", detail: "환자와 움직임이 확인되고 있어요.", tone: "good" },
   noFace: { label: "얼굴 확인 중", detail: "카메라 화면 안에 얼굴이 들어오게 해 주세요.", tone: "neutral" },
-  lowMovement: { label: "주의 알림", detail: "1분 이상 움직임이 적어요. 자세를 확인해 주세요.", tone: "warning" },
-  still: { label: "장시간 정지", detail: "3분 이상 움직임이 거의 없어요.", tone: "danger" },
+  lowMovement: { label: "주의 알림", detail: "10초 이상 움직임이 적어요. 자세를 확인해 주세요.", tone: "warning" },
+  still: { label: "장시간 정지", detail: "20초 이상 움직임이 거의 없어요.", tone: "danger" },
   away: { label: "자리 비움", detail: "화면에서 환자가 보이지 않아요. 자동 알림은 보내지 않습니다.", tone: "away" },
   cameraUnavailable: { label: "카메라 사용 불가", detail: "카메라 권한과 연결 상태를 확인해 주세요.", tone: "danger" },
 };
@@ -37,7 +37,7 @@ export function MotionTracking({ initialPatientId }: MotionTrackingProps) {
   const status = report?.status ?? (error ? "cameraUnavailable" : "noFace");
   const copy = statusCopy[status];
   const alertActive = status === "lowMovement" || status === "still";
-  const thresholdText = useMemo(() => fastMode ? "초단기 시연: 자리 비움 10초 · 주의 20초 · 정지 30초" : "테스트 기준: 자리 비움 30초 · 주의 1분 · 장시간 정지 3분", [fastMode]);
+  const thresholdText = useMemo(() => fastMode ? "초단기 시연: 자리 비움 3초 · 주의 6초 · 정지 12초" : "이번 시연 기준: 자리 비움 5초 · 주의 10초 · 장시간 정지 20초", [fastMode]);
 
   useEffect(() => {
     setEnabled(true);
