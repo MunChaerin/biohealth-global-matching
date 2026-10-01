@@ -14,6 +14,12 @@ import styles from "./patient-chat.module.css";
 const quickReplies = ["허리가 조금 불편해요", "기분은 괜찮아요", "창밖을 보고 싶어요"];
 const japaneseQuickReplies = ["腰が少しつらいです", "気分は大丈夫です", "窓の外を見たいです"];
 
+function localizeInitialMessage(text: string, language: ChatLanguage): string {
+  if (language === "ja" && text === "오늘 가장 불편한 점은 무엇인가요?") return "今日、いちばんつらいことは何ですか？";
+  if (language === "ko" && text === "今日、いちばんつらいことは何ですか？") return "오늘 가장 불편한 점은 무엇인가요?";
+  return text;
+}
+
 export function PatientChat() {
   const { context, error, isComplete, isLoading, safetyHold, finishSession, sendMessage, setLanguage } = usePatientChat();
   const speech = useSpeech(context.language ?? "ko");
@@ -56,7 +62,7 @@ export function PatientChat() {
         <section className={styles.conversationCard} aria-label="환자용 건강 대화">
           <div className={styles.conversationHead}><div className={styles.assistantIdentity}><span className={styles.assistantDot}>✦</span><div><b>{copy.assistant}</b><small><i /> {copy.listening}</small></div></div><span className={styles.voiceLabel}>{copy.voice}</span></div>
           <section className={styles.messages} aria-live="polite" aria-busy={isLoading}>
-            {context.messages.map((item, index) => <ChatMessage key={`${item.createdAt}-${index}`} message={item} language={language} canSpeak={speech.synthesisSupported} isSpeaking={speech.isSpeaking} onSpeak={speech.speak} onStopSpeaking={speech.stopSpeaking} />)}
+            {context.messages.map((item, index) => <ChatMessage key={`${item.createdAt}-${index}`} message={{ ...item, text: localizeInitialMessage(item.text, language) }} language={language} canSpeak={speech.synthesisSupported} isSpeaking={speech.isSpeaking} onSpeak={speech.speak} onStopSpeaking={speech.stopSpeaking} />)}
             {isLoading ? <p className={styles.loading}>{copy.loading}</p> : null}
             {error ? <p className={styles.error} role="alert">{error}</p> : null}
             {safetyHold ? <SafetyNotice language={language} /> : null}<div ref={endRef} />
