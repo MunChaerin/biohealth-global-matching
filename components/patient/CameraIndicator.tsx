@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { DEMO_PATIENT_ID, type CameraStatus } from "../../lib/camera/report";
+import type { ChatLanguage } from "../../lib/chatbot/types";
 import { sendReport, useFaceExpression } from "./useFaceExpression";
 import styles from "./patient-chat.module.css";
 
@@ -26,13 +27,23 @@ function saveConsent(value: "on" | "off") {
   }
 }
 
-const messages: Record<Exclude<CameraStatus, "off">, { text: string; hint?: string; active: boolean }> = {
+const messages: Record<ChatLanguage, Record<Exclude<CameraStatus, "off">, { text: string; hint?: string; active: boolean }>> = {
+  ko: {
   starting: { text: "표정 관찰 카메라를 켜고 있어요", active: false },
   calibrating: { text: "표정 관찰 카메라 작동 중", hint: "평소 표정으로 잠시 계셔 주세요", active: true },
   measuring: { text: "표정 관찰 카메라 작동 중", active: true },
   noFace: { text: "표정 관찰 카메라 작동 중", hint: "얼굴이 화면 안에 들어오게 해 주세요", active: true },
   permissionDenied: { text: "카메라 권한이 꺼져 있어 표정 관찰을 하지 않아요", active: false },
   unavailable: { text: "카메라를 사용할 수 없어 표정 관찰을 하지 않아요", active: false },
+  },
+  ja: {
+    starting: { text: "表情観察カメラを起動しています", active: false },
+    calibrating: { text: "表情観察カメラが作動中です", hint: "普段の表情でしばらくお待ちください", active: true },
+    measuring: { text: "表情観察カメラが作動中です", active: true },
+    noFace: { text: "表情観察カメラが作動中です", hint: "顔が画面に入るようにしてください", active: true },
+    permissionDenied: { text: "カメラの権限がないため観察していません", active: false },
+    unavailable: { text: "カメラを使用できないため観察していません", active: false },
+  },
 };
 
 /**
@@ -40,7 +51,7 @@ const messages: Record<Exclude<CameraStatus, "off">, { text: string; hint?: stri
  * 끄면 카메라·분석·전송이 모두 멈추고, 의료진 화면에는 "환자가 카메라를 끔"만 한 번 알린다.
  * 영상은 브라우저 안에서만 쓰고 저장·전송하지 않는다.
  */
-export function CameraIndicator() {
+export function CameraIndicator({ language = "ko" }: { language?: ChatLanguage }) {
   const [consent, setConsent] = useState<Consent>("unknown");
   const [loaded, setLoaded] = useState(false);
   const { videoRef, status, previewFilter } = useFaceExpression(consent === "on");
@@ -61,7 +72,8 @@ export function CameraIndicator() {
     void sendReport({ patientId: DEMO_PATIENT_ID, measuredAt: new Date().toISOString(), status: "off" });
   }
 
-  const message = status === "off" ? null : messages[status];
+  const isJapanese = language === "ja";
+  const message = status === "off" ? null : messages[language][status];
   const live = consent === "on" && !!message?.active;
 
   return (
@@ -74,19 +86,19 @@ export function CameraIndicator() {
         style={live && previewFilter !== 1 ? { filter: `brightness(${previewFilter})` } : undefined}
         muted
         playsInline
-        aria-label="표정 관찰 카메라 미리보기"
+        aria-label={isJapanese ? "表情観察カメラのプレビュー" : "표정 관찰 카메라 미리보기"}
       />
 
       {!loaded ? null : consent === "unknown" ? (
         <div className={styles.cameraText}>
-          <span><i className={styles.cameraDotOff} aria-hidden="true" />표정 관찰 카메라를 켤까요?</span>
-          <small>표정 변화를 의료진이 참고할 수 있도록 살펴봐요. 영상은 저장하거나 보내지 않아요. 언제든 끌 수 있어요.</small>
-          <button type="button" className={styles.cameraButton} onClick={turnOn}>카메라 켜기</button>
+          <span><i className={styles.cameraDotOff} aria-hidden="true" />{isJapanese ? "表情観察カメラを起動しますか？" : "표정 관찰 카메라를 켤까요?"}</span>
+          <small>{isJapanese ? "表情の変化を医療スタッフが参考にします。映像は保存・送信しません。いつでも停止できます。" : "표정 변화를 의료진이 참고할 수 있도록 살펴봐요. 영상은 저장하거나 보내지 않아요. 언제든 끌 수 있어요."}</small>
+          <button type="button" className={styles.cameraButton} onClick={turnOn}>{isJapanese ? "カメラを起動" : "카메라 켜기"}</button>
         </div>
       ) : consent === "off" ? (
         <div className={styles.cameraText}>
-          <span><i className={styles.cameraDotOff} aria-hidden="true" />표정 관찰 카메라가 꺼져 있어요</span>
-          <button type="button" className={styles.cameraButton} onClick={turnOn}>다시 켜기</button>
+          <span><i className={styles.cameraDotOff} aria-hidden="true" />{isJapanese ? "表情観察カメラは停止中です" : "표정 관찰 카메라가 꺼져 있어요"}</span>
+          <button type="button" className={styles.cameraButton} onClick={turnOn}>{isJapanese ? "再起動" : "다시 켜기"}</button>
         </div>
       ) : (
         <>
@@ -94,7 +106,7 @@ export function CameraIndicator() {
             <span><i className={message?.active ? styles.cameraDotOn : styles.cameraDotOff} aria-hidden="true" />{message?.text}</span>
             {message?.hint ? <small>{message.hint}</small> : null}
           </div>
-          <button type="button" className={styles.cameraOffButton} onClick={turnOff}>끄기</button>
+          <button type="button" className={styles.cameraOffButton} onClick={turnOff}>{isJapanese ? "停止" : "끄기"}</button>
         </>
       )}
     </div>

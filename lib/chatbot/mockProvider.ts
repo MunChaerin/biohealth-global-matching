@@ -22,7 +22,14 @@ const questionFlow: Array<{ target: QuestionTarget; field?: string; question: st
 ];
 
 function normalizeUnknown(text: string): string | "unknown" {
-  return /^(모르겠|잘 모르|기억이 안|없어요|없음|모름)/.test(text.trim()) ? "unknown" : text.trim();
+  return /^(모르겠|잘 모르|기억이 안|모름)/.test(text.trim()) ? "unknown" : text.trim();
+}
+
+function normalizeSubjectiveValue(field: string | undefined, text: string): string | number | "unknown" {
+  const normalized = normalizeUnknown(text);
+  if (field !== "severityNrs" || normalized === "unknown") return normalized;
+  const numberMatch = text.match(/(?:10|[0-9])(?:\.[0-9])?/);
+  return numberMatch ? Math.min(10, Math.max(0, Number(numberMatch[0]))) : normalized;
 }
 
 function nextStep(context: ChatbotContext): { target: QuestionTarget; field?: string; question: string } {
@@ -66,7 +73,7 @@ export class MockChatbotProvider implements ChatbotProvider {
     }
 
     const step = nextStep(input.context);
-    const value = normalizeUnknown(input.patientText);
+    const value = normalizeSubjectiveValue(step.field, input.patientText);
     const subjectivePatch = step.field ? { [step.field]: value } : {};
     const nextContext = {
       ...input.context,
@@ -81,7 +88,7 @@ export class MockChatbotProvider implements ChatbotProvider {
     return {
       patientReply,
       speechText: patientReply,
-      conversationState: isComplete ? "READY_FOR_SOAP" : stateForQuestion(next.target),
+      conversationState: isComplete ? "READY_FOR_SOAP" : stateForQuestion(step.target),
       subjectivePatch,
       nextQuestionTarget: isComplete ? undefined : next.target,
       missingFields: isComplete ? [] : [next.field ?? next.target],

@@ -15,6 +15,7 @@ export const conversationStates = [
 export type ConversationState = (typeof conversationStates)[number];
 
 export type SessionAction = "continue" | "pause" | "handoff" | "complete";
+export type ChatLanguage = "ko" | "ja";
 
 export type QuestionTarget =
   | "identity"
@@ -66,6 +67,7 @@ export interface ChatbotContext {
   subjective: SubjectiveData;
   safetyFlags: SafetyFlag[];
   consentGiven?: boolean;
+  language?: ChatLanguage;
 }
 
 export interface ChatMessage {

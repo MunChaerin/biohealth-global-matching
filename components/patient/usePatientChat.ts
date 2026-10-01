@@ -2,14 +2,17 @@
 
 import { useMemo, useRef, useState } from "react";
 import type {
+  ChatLanguage,
   ChatbotContext,
   ChatbotTurnOutput,
   ChatMessage,
   SafetyFlag,
   SubjectiveData,
 } from "../../lib/chatbot/types";
+import { DEMO_CHAT_SESSION_ID } from "../../lib/chatbot/soapDraft";
 
 const firstQuestion = "오늘 가장 불편한 점은 무엇인가요?";
+const firstQuestionJapanese = "今日、いちばんつらいことは何ですか？";
 
 function createId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -28,13 +31,14 @@ function mergeSafetyFlags(current: SafetyFlag[], incoming: SafetyFlag[]): Safety
 }
 
 export function usePatientChat() {
-  const ids = useMemo(() => ({ sessionId: createId("session"), patientId: createId("patient") }), []);
+  const ids = useMemo(() => ({ sessionId: DEMO_CHAT_SESSION_ID, patientId: "demo-patient" }), []);
   const [context, setContext] = useState<ChatbotContext>({
     ...ids,
     state: "CHIEF_CONCERN",
     messages: [message("assistant", firstQuestion)],
     subjective: {},
     safetyFlags: [],
+    language: "ko",
   });
   const contextRef = useRef(context);
   const requestInFlight = useRef(false);
@@ -42,25 +46,53 @@ export function usePatientChat() {
   const [error, setError] = useState<string | null>(null);
   const [sessionAction, setSessionAction] = useState<ChatbotTurnOutput["sessionAction"]>("continue");
 
+  function syncSession(next: ChatbotContext) {
+    void fetch("/api/chat/session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(next),
+    }).catch(() => undefined);
+  }
+
   function commit(next: ChatbotContext) {
     contextRef.current = next;
     setContext(next);
   }
 
+  function setLanguage(language: ChatLanguage) {
+    const current = contextRef.current;
+    const firstMessage = current.messages[0];
+    const isInitialQuestion = firstMessage?.role === "assistant" && (firstMessage.text === firstQuestion || firstMessage.text === firstQuestionJapanese);
+    commit({
+      ...current,
+      language,
+      messages: isInitialQuestion
+        ? [{ ...firstMessage, text: language === "ja" ? firstQuestionJapanese : firstQuestion }, ...current.messages.slice(1)]
+        : current.messages,
+    });
+  }
+
+  function finishSession() {
+    const next = { ...contextRef.current, state: "READY_FOR_SOAP" as const };
+    commit(next);
+    syncSession(next);
+    setSessionAction("complete");
+  }
+
   async function sendMessage(patientText: string): Promise<ChatbotTurnOutput | undefined> {
-    if (requestInFlight.current || sessionAction === "handoff" || contextRef.current.state === "SAFETY_HOLD") return;
+    if (requestInFlight.current || sessionAction === "handoff" || sessionAction === "complete" || contextRef.current.state === "SAFETY_HOLD" || contextRef.current.state === "READY_FOR_SOAP") return;
 
     requestInFlight.current = true;
     setIsLoading(true);
     setError(null);
 
     const patientMessage = message("patient", patientText);
+    const previousContext = contextRef.current;
     const requestContext = {
-      ...contextRef.current,
+      ...previousContext,
       messages: [...contextRef.current.messages, patientMessage],
     };
     commit(requestContext);
-
     try {
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -84,9 +116,12 @@ export function usePatientChat() {
         safetyFlags: nextSafetyFlags,
       };
       commit(nextContext);
+      syncSession(nextContext);
       setSessionAction(output.sessionAction);
       return output;
-    } catch {
+    } catch (error) {
+      console.error("chat request failed", error);
+      commit(previousContext);
       setError("잠시 연결이 원활하지 않습니다. 잠시 후 다시 말씀해 주세요.");
       return undefined;
     } finally {
@@ -97,5 +132,6 @@ export function usePatientChat() {
 
   const safetyHold = context.state === "SAFETY_HOLD" || sessionAction === "handoff" || context.safetyFlags.length > 0;
 
-  return { context, error, isLoading, safetyHold, sendMessage };
+  const isComplete = sessionAction === "complete" || context.state === "READY_FOR_SOAP";
+  return { context, error, isLoading, safetyHold, isComplete, finishSession, setLanguage, sendMessage };
 }
