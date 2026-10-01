@@ -197,6 +197,7 @@ export function ClinicianDashboard() {
       </section>
 
       <section className={styles.handoff}><div><p>TWO-WAY COMMUNICATION</p><h2>환자에게는 더 쉬운 말로</h2><span>SOAP 초안을 참고해 의료진이 수정한 설명을 환자 화면에 전달합니다.</span></div><div className={styles.preview}><small>환자용 미리보기</small><textarea value={explanation} onChange={(event) => { setExplanationSent(false); setExplanation(event.target.value); }} aria-label="환자에게 전달할 쉬운 설명" /><button type="button" onClick={() => void sendExplanation()}>{explanationSent ? "전달 완료 ✓" : "쉬운 설명 전달하기 ›"}</button></div></section>
+      {callStatus === "requested" && !acknowledgedAlerts.includes("call") ? <div className={styles.callModalBackdrop} role="presentation"><section className={styles.callModal} role="alertdialog" aria-modal="true" aria-labelledby="call-modal-title"><span className={styles.callModalIcon}>!</span><div><p>CARE ALERT</p><h2 id="call-modal-title">환자가 의료진을 호출했습니다</h2><span>환자 화면의 도움 요청을 확인해 주세요.</span></div><button type="button" onClick={() => { acknowledgeAlert("call"); void acknowledgeCall(); }}>확인 처리</button></section></div> : null}
     </main>
   );
 }
