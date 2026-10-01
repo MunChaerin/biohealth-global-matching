@@ -30,6 +30,7 @@ export function PatientChat() {
   const speech = useSpeech(context.language ?? "ko");
   const endRef = useRef<HTMLDivElement>(null);
   const [callStatus, setCallStatus] = useState<"requested" | "acknowledged" | null>(null);
+  const [callAcknowledged, setCallAcknowledged] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
   const [medicationTaken, setMedicationTaken] = useState(false);
   const language = context.language ?? "ko";
@@ -46,7 +47,15 @@ export function PatientChat() {
         fetch(`/api/care/call?patientId=${persona.id}`, { cache: "no-store" }),
         fetch(`/api/care/explanation?sessionId=${getChatSessionId(persona.id)}`, { cache: "no-store" }),
       ]);
-      if (callResponse?.ok) setCallStatus(((await callResponse.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null);
+      if (callResponse?.ok) {
+        const status = ((await callResponse.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null;
+        if (status === "acknowledged") {
+          setCallStatus(null);
+          setCallAcknowledged(true);
+        } else {
+          setCallStatus(status);
+        }
+      }
       if (explanationResponse?.ok) setExplanation(((await explanationResponse.json()) as { explanation?: { text: string } }).explanation?.text ?? null);
     };
     const interval = window.setInterval(() => void update(), 1500);
@@ -57,6 +66,7 @@ export function PatientChat() {
     const response = await fetch("/api/care/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: persona.id, sessionId: context.sessionId }) });
     if (response.ok) {
       setCallStatus("requested");
+      setCallAcknowledged(false);
       try { window.localStorage.setItem("carelink.careCall", JSON.stringify({ patientId: persona.id, status: "requested", at: Date.now() })); } catch { /* 서버 동기화로 동작 */ }
     }
   }
@@ -102,7 +112,7 @@ export function PatientChat() {
 
         <aside className={styles.patientSide}>
           <section className={styles.moodCard}><div className={styles.cardHeading}><div><p>{copy.moodLabel}</p><h2>{isJapanese && observation.title === "안정적인 표현이 늘고 있어요" ? "安心した表現が増えています" : observation.title}</h2></div><span className={styles.moodFace}>☺</span></div><div className={styles.moodMeter}><span style={{ width: `${observation.score}%` }} /><i /></div><div className={styles.moodLabels}><span>{copy.tired}</span><b>{copy.calm}</b></div><p className={styles.subtle}>{observation.detail}</p></section>
-          <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>{copy.help}</p><small>{callStatus ? copy.callConfirm : copy.helpHint}</small></div><button type="button" className={callStatus ? styles.called : ""} onClick={() => void callClinician()} disabled={!!callStatus}>{callStatus ? copy.called : copy.call}</button>{callStatus ? <small className={styles.callConfirm}>{callStatus === "acknowledged" ? "의료진이 확인했어요." : copy.callConfirm}</small> : null}</section>
+          <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>{copy.help}</p><small>{callStatus ? copy.callConfirm : callAcknowledged ? "의료진이 확인했어요. 다시 도움이 필요하면 눌러 주세요." : copy.helpHint}</small></div><button type="button" className={callStatus ? styles.called : ""} onClick={() => void callClinician()} disabled={callStatus === "requested"}>{callStatus ? copy.called : copy.call}</button>{callAcknowledged ? <small className={styles.callConfirm}>의료진이 확인했어요. 버튼을 다시 사용할 수 있어요.</small> : null}</section>
           <CameraIndicator language={language} patientId={persona.id} speechAssistActive={speech.isListening} />
         </aside>
       </div>
