@@ -10,6 +10,8 @@ import { usePatientChat } from "./usePatientChat";
 import { useSpeech } from "./useSpeech";
 import type { ChatLanguage } from "../../lib/chatbot/types";
 import { getPatientPersona } from "../../lib/patient/personas";
+import { getChatSessionId } from "../../lib/chatbot/soapDraft";
+import { createConversationObservation } from "../../lib/chatbot/observation";
 import styles from "./patient-chat.module.css";
 
 function localizeInitialMessage(text: string, language: ChatLanguage): string {
@@ -27,7 +29,8 @@ export function PatientChat() {
   const { context, error, isComplete, isLoading, safetyHold, finishSession, sendMessage, setLanguage } = usePatientChat(persona);
   const speech = useSpeech(context.language ?? "ko");
   const endRef = useRef<HTMLDivElement>(null);
-  const [isCalling, setIsCalling] = useState(false);
+  const [callStatus, setCallStatus] = useState<"requested" | "acknowledged" | null>(null);
+  const [explanation, setExplanation] = useState<string | null>(null);
   const [medicationTaken, setMedicationTaken] = useState(false);
   const language = context.language ?? "ko";
   const isJapanese = language === "ja";
@@ -35,6 +38,25 @@ export function PatientChat() {
     ? { kicker: "今日のケア対話", title: `${persona.japaneseName}さん、おはようございます。`, subtitle: persona.japaneseGreeting, notice: "日本語でお話ししています。音声入力も使えます。", assistant: "こころのケア友だち", listening: "一緒に聞いています", quick: "今の気持ちに近い言葉を選んでください。", soap: "SOAPの下書きを作成しました", soapHelp: "医療スタッフが確認して最終判断します。", placeholder: "つらいことをゆっくり話してください。", patient: "患者画面", clinician: "医療スタッフ画面", review: "医療スタッフの確認をサポート", language: "言語 ·", enlarge: "文字を大きく", voice: "◖ 音声で聞く", loading: "回答を確認しています...", assist: "◌　発音が不明瞭なときは", stt: "STT音声入力補助", assistEnd: "が一緒に働きます。", moodLabel: "今日の対話観察", moodTitle: "安心した表現が多くありました", tired: "少し疲れ", calm: "安心", moodHint: "最近の対話で観察された表現をまとめた参考情報です。", help: "お手伝いが必要ですか？", helpHint: "担当の医療スタッフにすぐ知らせます。", call: "医療スタッフを呼ぶ", called: "依頼を伝えました", callConfirm: "担当の医療スタッフに助けを求めました。", medicine: "次のお薬", medicineName: "午前の薬", medicineTime: "服薬予定を確認してください", medicineHint: "服薬情報は医療スタッフの確認用です。", taken: "飲みました", takenDone: "✓ 服薬を確認", planLabel: "今日の説明", planTitle: "医療スタッフが分かりやすく説明します", planText: `${persona.japaneseName}さん、今日の体調について医療スタッフが確認します。`, listen: "音声で聞く　›", soapLink: "医療スタッフ画面で確認 ›", footer: "ⓘ 健康状態の表示はケアのための参考情報であり、診断や緊急判断に代わるものではありません。" }
     : { kicker: "오늘의 돌봄 대화", title: `${persona.name} 어르신, 좋은 아침이에요.`, subtitle: persona.greeting, notice: "한국어로 대화하고 있어요. 음성 입력도 사용할 수 있어요.", assistant: "마음 돌봄 친구", listening: "함께 듣고 있어요", quick: "지금 마음에 가까운 말을 골라 보세요.", soap: "SOAP 초안을 작성했어요", soapHelp: "의료진이 확인한 뒤 최종 판단합니다.", placeholder: "불편한 점을 편하게 말씀해 주세요.", patient: "환자 화면", clinician: "의료진 화면", review: "의료진 검토 보조", language: "언어 ·", enlarge: "글자 크게", voice: "◖ 음성으로 듣기", loading: "답변을 확인하고 있어요...", assist: "◌　발음이 불분명할 때는", stt: "STT 음성 입력 보조", assistEnd: "가 함께 작동해요.", moodLabel: "오늘의 대화 관찰", moodTitle: "대화 관찰을 준비하고 있어요", tired: "확인 중", calm: "참고", moodHint: `${persona.summary}. 대화와 센서 정보가 쌓이면 갱신됩니다.`, help: "도움이 필요하세요?", helpHint: "담당 의료진에게 바로 알려드려요.", call: "의료진 부르기", called: "요청을 알렸어요", callConfirm: "담당 의료진에게 도움 요청을 알렸어요.", medicine: "복용 약물", medicineName: persona.medications, medicineTime: `${persona.age}세 · ${persona.room}`, medicineHint: persona.symptoms, taken: "복용했어요", takenDone: "✓ 복용 확인", planLabel: "오늘의 설명", planTitle: "의료진이 쉽게 알려드려요", planText: `${persona.name} 어르신, 오늘 상태를 의료진이 확인하고 쉬운 설명으로 알려드릴게요.`, listen: "음성으로 듣기　›", soapLink: "의료진 화면에서 확인 ›", footer: "ⓘ 건강 상태 표시는 돌봄을 돕기 위한 참고 정보이며, 진단이나 응급 판단을 대신하지 않습니다." };
   const replies = isJapanese ? persona.japaneseQuickReplies : persona.quickReplies;
+  const observation = createConversationObservation(context);
+
+  useEffect(() => {
+    const update = async () => {
+      const [callResponse, explanationResponse] = await Promise.all([
+        fetch(`/api/care/call?patientId=${persona.id}`, { cache: "no-store" }),
+        fetch(`/api/care/explanation?sessionId=${getChatSessionId(persona.id)}`, { cache: "no-store" }),
+      ]);
+      if (callResponse?.ok) setCallStatus(((await callResponse.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null);
+      if (explanationResponse?.ok) setExplanation(((await explanationResponse.json()) as { explanation?: { text: string } }).explanation?.text ?? null);
+    };
+    const interval = window.setInterval(() => void update(), 1500);
+    return () => window.clearInterval(interval);
+  }, [persona.id]);
+
+  async function callClinician() {
+    const response = await fetch("/api/care/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: persona.id, sessionId: context.sessionId }) });
+    if (response.ok) setCallStatus("requested");
+  }
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -76,13 +98,13 @@ export function PatientChat() {
         </section>
 
         <aside className={styles.patientSide}>
-          <section className={styles.moodCard}><div className={styles.cardHeading}><div><p>{copy.moodLabel}</p><h2>{copy.moodTitle}</h2></div><span className={styles.moodFace}>☺</span></div><div className={styles.moodMeter}><span /><i /></div><div className={styles.moodLabels}><span>{copy.tired}</span><b>{copy.calm}</b></div><p className={styles.subtle}>{copy.moodHint}</p></section>
-          <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>{copy.help}</p><small>{copy.helpHint}</small></div><button type="button" className={isCalling ? styles.called : ""} onClick={() => setIsCalling(true)} disabled={isCalling}>{isCalling ? copy.called : copy.call}</button>{isCalling ? <small className={styles.callConfirm}>{copy.callConfirm}</small> : null}</section>
-          <CameraIndicator language={language} />
+          <section className={styles.moodCard}><div className={styles.cardHeading}><div><p>{copy.moodLabel}</p><h2>{isJapanese && observation.title === "안정적인 표현이 늘고 있어요" ? "安心した表現が増えています" : observation.title}</h2></div><span className={styles.moodFace}>☺</span></div><div className={styles.moodMeter}><span style={{ width: `${observation.score}%` }} /><i /></div><div className={styles.moodLabels}><span>{copy.tired}</span><b>{copy.calm}</b></div><p className={styles.subtle}>{observation.detail}</p></section>
+          <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>{copy.help}</p><small>{callStatus ? copy.callConfirm : copy.helpHint}</small></div><button type="button" className={callStatus ? styles.called : ""} onClick={() => void callClinician()} disabled={!!callStatus}>{callStatus ? copy.called : copy.call}</button>{callStatus ? <small className={styles.callConfirm}>{callStatus === "acknowledged" ? "의료진이 확인했어요." : copy.callConfirm}</small> : null}</section>
+          <CameraIndicator language={language} patientId={persona.id} speechAssistActive={speech.isListening} />
         </aside>
       </div>
 
-      <div className={styles.bottomGrid}><section className={styles.medicineCard}><div className={styles.cardHeading}><div><p>{copy.medicine}</p><h2>{copy.medicineName}</h2><small>{copy.medicineTime}</small></div><span className={styles.medicineIcon}>＋</span></div><div className={styles.medicineAction}><span>{copy.medicineHint}</span><button type="button" onClick={() => setMedicationTaken(true)} className={medicationTaken ? styles.completed : ""}>{medicationTaken ? copy.takenDone : copy.taken}</button></div></section><section className={styles.easyPlanCard}><div className={styles.planTitle}><span>♡</span><div><p>{copy.planLabel}</p><h2>{copy.planTitle}</h2></div></div><p>{copy.planText}</p><button type="button" onClick={() => speech.speak(copy.planText)}>{copy.listen}</button></section></div>
+      <div className={styles.bottomGrid}><section className={styles.medicineCard}><div className={styles.cardHeading}><div><p>{copy.medicine}</p><h2>{copy.medicineName}</h2><small>{copy.medicineTime}</small></div><span className={styles.medicineIcon}>＋</span></div><div className={styles.medicineAction}><span>{copy.medicineHint}</span><button type="button" onClick={() => setMedicationTaken(true)} className={medicationTaken ? styles.completed : ""}>{medicationTaken ? copy.takenDone : copy.taken}</button></div></section><section className={styles.easyPlanCard}><div className={styles.planTitle}><span>♡</span><div><p>{copy.planLabel}</p><h2>{explanation ? (isJapanese ? "医療スタッフからの説明" : "의료진이 보낸 설명") : copy.planTitle}</h2></div></div><p>{explanation ?? copy.planText}</p><button type="button" onClick={() => speech.speak(explanation ?? copy.planText)}>{copy.listen}</button></section></div>
       <p className={styles.footnote}>{copy.footer}</p>
     </main>
   );

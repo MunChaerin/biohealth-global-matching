@@ -6,6 +6,7 @@ import { FacialObservation } from "./FacialObservation";
 import { createSoapDraft, getChatSessionId, type SoapDraft } from "../../lib/chatbot/soapDraft";
 import type { ChatbotContext } from "../../lib/chatbot/types";
 import { defaultPersona, getPatientPersona, patientPersonas } from "../../lib/patient/personas";
+import { createConversationObservation } from "../../lib/chatbot/observation";
 import styles from "./clinician-dashboard.module.css";
 
 const priorities = [
@@ -34,6 +35,10 @@ export function ClinicianDashboard() {
   const selectedPersona = getPatientPersona(selectedPersonaId);
   const [soap, setSoap] = useState<SoapDraft>(emptySoap);
   const [plan, setPlan] = useState(emptySoap.plan);
+  const [callStatus, setCallStatus] = useState<"requested" | "acknowledged" | null>(null);
+  const [explanation, setExplanation] = useState("");
+  const [explanationSent, setExplanationSent] = useState(false);
+  const [observation, setObservation] = useState(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: "", patientId: "" }));
   const planEditedRef = useRef(false);
 
   useEffect(() => {
@@ -45,7 +50,9 @@ export function ClinicianDashboard() {
         if (!payload.context) return;
         const next = createSoapDraft(payload.context);
         setSoap(next);
+        setObservation(createConversationObservation(payload.context));
         if (!planEditedRef.current) setPlan(next.plan);
+        if (!explanationSent) setExplanation(next.assessment);
       } catch {
         // 의료진 화면은 마지막 정상 초안을 유지한다.
       }
@@ -56,6 +63,26 @@ export function ClinicianDashboard() {
       window.clearInterval(interval);
     };
   }, [selectedPersona.id]);
+
+  useEffect(() => {
+    const updateCall = async () => {
+      const response = await fetch(`/api/care/call?patientId=${selectedPersona.id}`, { cache: "no-store" });
+      if (response.ok) setCallStatus(((await response.json()) as { call?: { status: "requested" | "acknowledged" } }).call?.status ?? null);
+    };
+    void updateCall();
+    const interval = window.setInterval(updateCall, 1500);
+    return () => window.clearInterval(interval);
+  }, [selectedPersona.id]);
+
+  async function acknowledgeCall() {
+    const response = await fetch("/api/care/call", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ patientId: selectedPersona.id, action: "acknowledge" }) });
+    if (response.ok) setCallStatus("acknowledged");
+  }
+
+  async function sendExplanation() {
+    const response = await fetch("/api/care/explanation", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionId: getChatSessionId(selectedPersona.id), text: explanation, language: "ko" }) });
+    if (response.ok) setExplanationSent(true);
+  }
 
   return (
     <main className={styles.page}>
@@ -86,8 +113,9 @@ export function ClinicianDashboard() {
       </div>
 
       <section className={styles.prioritySection}>
-        <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><span>확인할 기록 2건 ›</span></div>
+        <div className={styles.sectionHeading}><div><p>PRIORITY</p><h2>지금 확인할 사항</h2></div><span>확인할 기록 {callStatus === "requested" ? 3 : 2}건 ›</span></div>
         <div className={styles.priorityGrid}>
+          {callStatus === "requested" ? <article className={`${styles.priorityCard} ${styles.alert}`}><span className={styles.priorityIcon}>!</span><div><strong>환자가 의료진을 호출했습니다</strong><p>환자 화면의 도움 요청을 확인해 주세요.</p><button type="button" onClick={() => void acknowledgeCall()}>확인 처리</button></div><time>지금</time></article> : null}
           {priorities.map((item) => <article className={`${styles.priorityCard} ${styles[item.tone]}`} key={item.label}><span className={styles.priorityIcon}>{item.tone === "observe" ? "⌁" : "◔"}</span><div><strong>{item.label}</strong><p>{item.detail}</p></div><time>{item.time}</time></article>)}
         </div>
       </section>
@@ -96,20 +124,20 @@ export function ClinicianDashboard() {
         <article className={styles.panel}>
           <div className={styles.panelHeading}><div><p>OBJECTIVE SIGNALS</p><h2>생체신호 · 모션</h2></div><span className={styles.badge}>현재 기록</span></div>
           <div className={styles.metrics}>
-            <div><span>맥박</span><strong>76 <small>bpm</small></strong><em>안정</em></div>
-            <div><span>SpO₂</span><strong>97 <small>%</small></strong><em>안정</em></div>
-            <div><span>ECG</span><strong>정상 <small>리듬</small></strong><em>안정</em></div>
+            <div><span>맥박</span><strong>미연동</strong><em>센서 대기</em></div>
+            <div><span>SpO₂</span><strong>미연동</strong><em>센서 대기</em></div>
+            <div><span>ECG</span><strong>미연동</strong><em>센서 대기</em></div>
           </div>
           <div className={styles.motion}><div><span>체위·모션 추적</span><strong>2시간 6분 동일 체위</strong></div><div className={styles.timeline}><i /><i /><i /><i /></div><div className={styles.timelineLabels}><span>07:00</span><span>08:00</span><span>09:00</span><span>현재</span></div></div>
           <button className={styles.textButton} type="button">원시 센서 기록 보기 ›</button>
         </article>
 
         <article className={styles.panel}>
-          <div className={styles.panelHeading}><div><p>OBSERVATION</p><h2>대화·표정 관찰</h2></div><span className={styles.trend}>↗ 안정 표현 증가</span></div>
+          <div className={styles.panelHeading}><div><p>OBSERVATION</p><h2>대화·표정 관찰</h2></div><span className={styles.trend}>{observation.trend}</span></div>
           <div className={styles.chart} aria-label="최근 7일 대화 관찰 기록">{days.map(([day, value]) => <div key={day as string}><i style={{ height: `${value}%` }} /><span>{day}</span></div>)}</div>
           <div className={styles.legend}><span><i /> 안정 <b>주요 표현</b></span><span><i /> 보통 <b>혼재</b></span><span><i /> 관찰 <b>확인 필요</b></span></div>
-          <div className={styles.insight}>○ <span>오늘 아침 대화에서 “창밖을 보고 싶다”는 표현이 관찰되었습니다.</span></div>
-          <FacialObservation />
+          <div className={styles.insight}>○ <span>{observation.detail} {observation.evidence !== "환자 발화 없음" ? `최근 발화: “${observation.evidence}”` : ""}</span></div>
+          <FacialObservation patientId={selectedPersona.id} />
         </article>
       </section>
 
@@ -123,7 +151,7 @@ export function ClinicianDashboard() {
         </div>
       </section>
 
-      <section className={styles.handoff}><div><p>TWO-WAY COMMUNICATION</p><h2>환자에게는 더 쉬운 말로</h2><span>검토한 결과를 일상 언어로 바꾸어 환자 화면에 전달합니다.</span></div><div className={styles.preview}><small>환자용 미리보기</small><p>자세를 편하게 바꿔 드리고, 오늘 저녁에 허리 불편감과 잠은 다시 살펴볼게요.</p><button type="button">쉬운 설명 전달하기 ›</button></div></section>
+      <section className={styles.handoff}><div><p>TWO-WAY COMMUNICATION</p><h2>환자에게는 더 쉬운 말로</h2><span>SOAP 초안을 참고해 의료진이 수정한 설명을 환자 화면에 전달합니다.</span></div><div className={styles.preview}><small>환자용 미리보기</small><textarea value={explanation} onChange={(event) => { setExplanationSent(false); setExplanation(event.target.value); }} aria-label="환자에게 전달할 쉬운 설명" /><button type="button" onClick={() => void sendExplanation()}>{explanationSent ? "전달 완료 ✓" : "쉬운 설명 전달하기 ›"}</button></div></section>
     </main>
   );
 }
