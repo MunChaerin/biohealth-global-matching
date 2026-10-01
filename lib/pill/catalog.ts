@@ -2,17 +2,18 @@ import { medicationSchedules } from "../medication/schedule";
 
 // 약 코드 -> 화면에 보여줄 이름. 복약 일정에 있는 약 + 모델이 구분하는 나머지 약.
 // 모델이 학습하는 10종 = 시연 2종(일정에 있음) + 아래 8종. 순서는 camera-model/pill-recognition/classes.json.
-// 8종은 시연 약과 색·모양이 다른 약 위주에, 비슷한 흰 약 2종(부루펜, 마그밀)을 섞어
+// 8종은 다운로드 양을 줄이려고 시연 약이 든 이미지 zip(TS_3, VS_10) 안에서 골랐다.
+// 색·모양이 다른 약 6종 + 시연 약과 비슷한 흰 약 2종(무스판정 ≈ 타이레놀, 독립목클린캡슐 ≈ 리리베아)을 섞어
 // 모델이 색만 보고 외우지 않고 모양·각인까지 보고 구분하도록 했다.
 const extraPills: Record<string, { name: string; japaneseName: string }> = {
-  "K-011354": { name: "애드빌정", japaneseName: "アドビル錠" },
-  "K-000112": { name: "아로나민골드", japaneseName: "アロナミンゴールド" },
-  "K-026632": { name: "둘코락스에스장용정", japaneseName: "ダルコラックスS腸溶錠" },
-  "K-012769": { name: "닥터베아제정", japaneseName: "ドクターベアゼ錠" },
-  "K-007024": { name: "훼스탈플러스정", japaneseName: "フェスタルプラス錠" },
-  "K-014249": { name: "이지엔6애니연질캡슐", japaneseName: "イージーエン6エニー軟カプセル" },
-  "K-001029": { name: "부루펜정 400mg", japaneseName: "ブルフェン錠400mg" },
-  "K-000250": { name: "마그밀정 500mg", japaneseName: "マグミル錠500mg" },
+  "K-044732": { name: "레드리버연질캡슐", japaneseName: "レッドリバー軟カプセル" },
+  "K-004268": { name: "듀오락스정", japaneseName: "デュオラックス錠" },
+  "K-003727": { name: "퍼킨정", japaneseName: "パーキン錠" },
+  "K-005676": { name: "복합파자임이중정", japaneseName: "複合パザイム二層錠" },
+  "K-003746": { name: "토파제정", japaneseName: "トパゼ錠" },
+  "K-005466": { name: "베스자임정", japaneseName: "ベスザイム錠" },
+  "K-005849": { name: "무스판정", japaneseName: "ムスパン錠" },
+  "K-045269": { name: "독립목클린캡슐", japaneseName: "ドクリプモッククリンカプセル" },
 };
 
 /** 마지막 글자에 받침이 있으면 withFinal, 없으면 withoutFinal을 붙인다. 예: 받침(약, "이에요", "예요") */

@@ -43,10 +43,10 @@ describe("/api/medication", () => {
 
   it("다른 약을 비춘 횟수와 마지막으로 보인 약을 기록한다", async () => {
     await post({ patientId, medicationId: "tanaka-lyribea-am", event: "mismatch", detectedDrugCode: "K-004378" });
-    await post({ patientId, medicationId: "tanaka-lyribea-am", event: "mismatch", detectedDrugCode: "K-011354" });
+    await post({ patientId, medicationId: "tanaka-lyribea-am", event: "mismatch", detectedDrugCode: "K-005849" });
     const item = (await today()).body.items[0];
     expect(item?.mismatchCount).toBe(2);
-    expect(item?.lastMismatch?.detectedDrugCode).toBe("K-011354");
+    expect(item?.lastMismatch?.detectedDrugCode).toBe("K-005849");
     expect(item?.status).toBe("pending");
   });
 
