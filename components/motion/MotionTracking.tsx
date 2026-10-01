@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { defaultPersona, getPatientPersona, patientPersonas } from "../../lib/patient/personas";
+import { getPatientPersona, patientPersonas } from "../../lib/patient/personas";
 import { MOTION_THRESHOLDS, type MotionReport, type MotionStatus } from "../../lib/motion/types";
 import { useMotionTracking } from "./useMotionTracking";
 import styles from "./motion-tracking.module.css";
@@ -23,8 +23,12 @@ function formatDuration(seconds: number) {
   return minutes ? `${minutes}분 ${rest}초` : `${rest}초`;
 }
 
-export function MotionTracking() {
-  const [selectedId, setSelectedId] = useState(defaultPersona.id);
+interface MotionTrackingProps {
+  initialPatientId?: string;
+}
+
+export function MotionTracking({ initialPatientId }: MotionTrackingProps) {
+  const [selectedId, setSelectedId] = useState(getPatientPersona(initialPatientId).id);
   const [fastMode, setFastMode] = useState(false);
   const [enabled, setEnabled] = useState(true);
   const persona = getPatientPersona(selectedId);
