@@ -123,7 +123,7 @@ export function PatientChat() {
       </section>
 
       <div className={styles.notice}><span>i</span><p>{copy.notice}</p></div>
-      {motionStatus ? <div className={styles.motionNotice} role="alert" aria-live="assertive"><span>!</span><p><strong>{isJapanese ? "動きの状態を確認してください" : "움직임 상태를 확인해 주세요"}</strong>{isJapanese ? (motionStatus === "still" ? "長時間同じ姿勢が続いています。無理のない範囲で姿勢を少し変えてみましょう。" : "動きが少ない状態が続いています。姿勢を確認してみましょう。") : (motionStatus === "still" ? "같은 자세가 오래 이어지고 있어요. 무리하지 않는 범위에서 자세를 조금 바꿔볼까요?" : "움직임이 적은 상태가 이어지고 있어요. 자세를 한 번 확인해볼까요?")}</p></div> : null}
+      {motionStatus ? <div className={styles.motionNotice} role="alert" aria-live="assertive"><span>!</span><p><strong>{isJapanese ? (motionStatus === "still" ? "長時間の停止を確認してください" : "注意：動きの状態を確認してください") : (motionStatus === "still" ? "장시간 정지를 확인해 주세요" : "주의 알림: 움직임을 확인해 주세요")}</strong>{isJapanese ? (motionStatus === "still" ? "3分以上同じ姿勢が続いています。無理のない範囲で姿勢を少し変えてみましょう。" : "1分以上動きが少ない状態が続いています。姿勢を確認してみましょう。") : (motionStatus === "still" ? "3분 이상 같은 자세가 이어지고 있어요. 무리하지 않는 범위에서 자세를 조금 바꿔볼까요?" : "1분 이상 움직임이 적은 상태가 이어지고 있어요. 자세를 한 번 확인해볼까요?")}</p></div> : null}
 
       <div className={styles.patientLayout}>
         <section className={styles.conversationCard} aria-label="환자용 건강 대화">
