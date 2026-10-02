@@ -54,7 +54,7 @@ export function decodeYoloOutput(
 ): PillDetection[] {
   const [, channels, count] = dims as [number, number, number];
   const classCount = channels - 4;
-  if (classCount !== classes.length) throw new Error(`모델 클래스 수(${classCount})와 manifest 클래스 수(${classes.length})가 다릅니다.`);
+  if (classCount !== classes.length) throw new Error(`모델 클래스 수(${classCount})와 메타데이터(classOrder) 클래스 수(${classes.length})가 다릅니다.`);
 
   const candidates: RawBox[] = [];
   for (let i = 0; i < count; i += 1) {

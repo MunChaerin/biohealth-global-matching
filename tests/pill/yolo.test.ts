@@ -44,7 +44,7 @@ describe("decodeYoloOutput", () => {
     expect(pills.map((pill) => pill.drugCode)).toEqual(["A", "C"]);
   });
 
-  it("모델 클래스 수와 manifest가 다르면 오류", () => {
+  it("모델 클래스 수와 메타데이터 클래스 수가 다르면 오류", () => {
     const { data, dims } = fakeOutput([[320, 320, 60, 60, 0.8, 0.1]]);
     expect(() => decodeYoloOutput(data, dims, classes, box)).toThrow(/클래스 수/);
   });

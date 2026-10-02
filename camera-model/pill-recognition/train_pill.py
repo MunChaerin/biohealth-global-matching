@@ -10,7 +10,7 @@ r"""
 
 결과:
     runs/pill/                  학습 기록, 혼동행렬, best.pt
-    ../../public/models/pill/   웹에서 쓰는 pill-detector.onnx + manifest.json
+    ../../public/models/pill/   웹에서 쓰는 pill_classifier.onnx + classes.json + model-metadata.json
 """
 
 import argparse
@@ -101,14 +101,63 @@ def evaluate(weights: Path, data: Path, classes: list[dict]) -> dict:
     return report
 
 
+MODEL_VERSION = "pill-yolo11n-10cls-v1"
+
+
 def export_for_web(weights: Path, classes: list[dict]) -> None:
-    """브라우저(onnxruntime-web)용 ONNX와 manifest를 public/models/pill/에 둔다."""
+    """브라우저(onnxruntime-web)용 산출물을 public/models/pill/에 둔다.
+
+    pill_classifier.onnx  모델
+    classes.json          클래스 번호 순서대로 약 코드·이름
+    model-metadata.json   웹 전처리·후처리에 필요한 정보 (입력 크기, RGB, 정규화, 클래스 순서, 기준값, 날짜 등)
+    """
+    from datetime import date
+
     model = YOLO(str(weights))
     onnx_path = Path(model.export(format="onnx", imgsz=IMG_SIZE, opset=12, simplify=True, dynamic=False))
     WEB_MODEL_DIR.mkdir(parents=True, exist_ok=True)
-    shutil.copy(onnx_path, WEB_MODEL_DIR / "pill-detector.onnx")
-    manifest = {"model": "pill-detector.onnx", "inputSize": IMG_SIZE, "classes": [c["code"] for c in classes]}
-    (WEB_MODEL_DIR / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    for old in ("pill-detector.onnx", "manifest.json"):  # 예전 이름 정리
+        (WEB_MODEL_DIR / old).unlink(missing_ok=True)
+    shutil.copy(onnx_path, WEB_MODEL_DIR / "pill_classifier.onnx")
+
+    (WEB_MODEL_DIR / "classes.json").write_text(json.dumps(
+        [{"index": i, "code": c["code"], "name": c["name"]} for i, c in enumerate(classes)],
+        ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    report_path = HERE / "runs" / "pill_test_report.json"
+    report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
+    metadata = {
+        "modelVersion": MODEL_VERSION,
+        "task": "detection",
+        "architecture": "YOLO11n (Ultralytics), 알약 위치 + 10종 분류",
+        "file": "pill_classifier.onnx",
+        "fileSizeMB": round((WEB_MODEL_DIR / "pill_classifier.onnx").stat().st_size / 1e6, 1),
+        "input": {
+            "name": "images",
+            "shape": [1, 3, IMG_SIZE, IMG_SIZE],
+            "dtype": "float32",
+            "layout": "NCHW",
+            "colorOrder": "RGB",
+            "normalization": "픽셀값 / 255 (0~1), 평균·표준편차 정규화 없음",
+            "resize": f"비율 유지 레터박스 {IMG_SIZE}x{IMG_SIZE}, 가운데 배치, 여백은 회색 (114,114,114)",
+        },
+        "output": {
+            "name": "output0",
+            "shape": [1, 4 + len(classes), 8400],
+            "format": "후보 8400개 x (cx, cy, w, h [입력 픽셀 기준] + 클래스별 점수 0~1). NMS는 웹에서 (클래스 구분 없이, IoU 0.5)",
+        },
+        "classOrder": [c["code"] for c in classes],
+        "thresholds": {
+            "detect": 0.4,  # 이보다 낮은 검출은 알약으로 보지 않음
+            "confidence": CONFIDENT,  # 이보다 낮으면 unknown (학습하지 않은 약 억지 분류 방지)
+            "stableMs": 1000,  # 같은 결과가 이만큼 이어져야 판정
+        },
+        "trainedAt": date.fromtimestamp(Path(weights).stat().st_mtime).isoformat(),
+        "exportedAt": date.today().isoformat(),
+        "dataset": "AI Hub 경구약제 이미지 데이터(576) 중 10종 (TS_3, VS_10) + 배경 합성. 돌린 각도 기준 학습/검증/시험 분리",
+        "testMetrics": {k: report.get(k) for k in ("mAP50", "mAP50_95", "overall_correct", "overall_wrong_pill")},
+    }
+    (WEB_MODEL_DIR / "model-metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"[웹 모델] {WEB_MODEL_DIR}")
 
 

@@ -41,7 +41,7 @@ describe("알약 확인 모드", () => {
 
   beforeEach(() => {
     window.localStorage.clear();
-    vi.stubGlobal("fetch", vi.fn(async (url: string) => (url.includes("manifest") ? new Response("", { status: 404 }) : new Response("{}"))));
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => (url.includes("model-metadata") ? new Response("", { status: 404 }) : new Response("{}"))));
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     // jsdom에는 실제 영상이 없으므로 영상이 준비된 것처럼 만든다
     vi.spyOn(HTMLMediaElement.prototype, "readyState", "get").mockReturnValue(4);

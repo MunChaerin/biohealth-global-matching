@@ -48,10 +48,14 @@ python capture_pills.py --drug pending:amlodipine
 `own_photos/<약 코드>/`에 사진과 위치 정보(json)가 저장된다. 손이 나올 수 있어 레포에는 올리지 않는다(`.gitignore`).
 촬영 팁은 `capture_pills.py` 맨 위 설명 참고.
 
-## 모델 파일 형식 (`public/models/pill/manifest.json`)
+## 모델 파일 (`public/models/pill/`)
 
-```json
-{ "model": "pill-detector.onnx", "inputSize": 640, "classes": ["<약 코드 0>", "<약 코드 1>", "..."] }
-```
+| 파일 | 내용 |
+|---|---|
+| `pill_classifier.onnx` | 모델 (YOLO11n, 10.6MB) |
+| `classes.json` | 클래스 번호 순서대로 약 코드·이름 |
+| `model-metadata.json` | 모델 버전, 입력(1x3x640x640, RGB, /255, 회색 114 레터박스), 출력(1x14x8400), 클래스 순서, 기준값(검출 0.4 / 확신 0.6 / 1초), 날짜, 시험 성적 |
 
-`classes` 순서는 학습할 때의 클래스 번호와 같아야 하고, 값은 `lib/medication/schedule.ts`의 `drugCode`와 같아야 한다.
+`train_pill.py --export-only runs/pill/weights/best.pt`로 다시 만들 수 있다.
+웹은 `NEXT_PUBLIC_PILL_MODEL_URL`(기본 `/models/pill/pill_classifier.onnx`)로 모델 위치를 바꿀 수 있고,
+메타데이터는 모델과 같은 폴더의 `model-metadata.json`을 읽는다 (`NEXT_PUBLIC_PILL_MODEL_METADATA_URL`로 변경 가능).
