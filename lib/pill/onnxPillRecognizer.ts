@@ -34,7 +34,6 @@ export async function createOnnxPillRecognizer(metadata: PillModelMetadata, mode
   canvas.height = size;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("캔버스를 사용할 수 없습니다.");
-  const input = new Float32Array(3 * size * size);
   let firstInference = true;
 
   return {
@@ -52,6 +51,8 @@ export async function createOnnxPillRecognizer(metadata: PillModelMetadata, mode
       context.drawImage(frame, box.padX, box.padY, width * box.scale, height * box.scale);
       const pixels = context.getImageData(0, 0, size, size).data;
       const area = size * size;
+      // 매 프레임 새로 만든다: Worker 방식은 run() 때 입력 버퍼를 Worker로 넘겨서(transfer) 원래 배열이 비워진다
+      const input = new Float32Array(3 * area);
       for (let i = 0; i < area; i += 1) {
         input[i] = pixels[i * 4]! / 255;
         input[area + i] = pixels[i * 4 + 1]! / 255;
