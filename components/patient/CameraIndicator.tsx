@@ -62,6 +62,7 @@ export interface PillCheckRequest {
   debug?: boolean; // 모델 없이 버튼으로 화면 흐름 확인 (?pillDebug=1)
   onClose: () => void;
   onTaken: () => void;
+  speak?: (text: string) => void; // 약 확인 결과 음성 안내
 }
 
 export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, speechAssistActive = false, pillCheck }: { language?: ChatLanguage; patientId?: string; speechAssistActive?: boolean; pillCheck?: PillCheckRequest | null }) {
@@ -154,6 +155,8 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
           }}
           onClose={pillCheck.onClose}
           debugShow={pillCheck.debug ? pill.debugShow : undefined}
+          evidence={pill.evidence}
+          speak={pillCheck.speak}
         />
       ) : !loaded ? null : consent === "unknown" ? (
         <div className={styles.cameraText}>

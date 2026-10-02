@@ -141,6 +141,7 @@ export function PatientChat() {
               debug: pillDebug,
               onClose: () => setPillCheckMedication(null),
               onTaken: () => void medication.refresh(),
+              speak: speech.speak,
             } : null}
           />
         </aside>

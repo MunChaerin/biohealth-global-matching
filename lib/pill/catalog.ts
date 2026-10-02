@@ -5,15 +5,15 @@ import { medicationSchedules } from "../medication/schedule";
 // 8종은 다운로드 양을 줄이려고 시연 약이 든 이미지 zip(TS_3, VS_10) 안에서 골랐다.
 // 색·모양이 다른 약 6종 + 시연 약과 비슷한 흰 약 2종(무스판정 ≈ 타이레놀, 독립목클린캡슐 ≈ 리리베아)을 섞어
 // 모델이 색만 보고 외우지 않고 모양·각인까지 보고 구분하도록 했다.
-const extraPills: Record<string, { name: string; japaneseName: string }> = {
-  "K-044732": { name: "레드리버연질캡슐", japaneseName: "レッドリバー軟カプセル" },
-  "K-004268": { name: "듀오락스정", japaneseName: "デュオラックス錠" },
-  "K-003727": { name: "퍼킨정", japaneseName: "パーキン錠" },
-  "K-005676": { name: "복합파자임이중정", japaneseName: "複合パザイム二層錠" },
-  "K-003746": { name: "토파제정", japaneseName: "トパゼ錠" },
-  "K-005466": { name: "베스자임정", japaneseName: "ベスザイム錠" },
-  "K-005849": { name: "무스판정", japaneseName: "ムスパン錠" },
-  "K-045269": { name: "독립목클린캡슐", japaneseName: "ドクリプモッククリンカプセル" },
+const extraPills: Record<string, { name: string; japaneseName: string; imprint: string }> = {
+  "K-044732": { name: "레드리버연질캡슐", japaneseName: "レッドリバー軟カプセル", imprint: "JHRL" },
+  "K-004268": { name: "듀오락스정", japaneseName: "デュオラックス錠", imprint: "YI / 24" },
+  "K-003727": { name: "퍼킨정", japaneseName: "パーキン錠", imprint: "C L" },
+  "K-005676": { name: "복합파자임이중정", japaneseName: "複合パザイム二層錠", imprint: "PΛZ" },
+  "K-003746": { name: "토파제정", japaneseName: "トパゼ錠", imprint: "MKTF" },
+  "K-005466": { name: "베스자임정", japaneseName: "ベスザイム錠", imprint: "BSZT" },
+  "K-005849": { name: "무스판정", japaneseName: "ムスパン錠", imprint: "MSP 500" },
+  "K-045269": { name: "독립목클린캡슐", japaneseName: "ドクリプモッククリンカプセル", imprint: "DLB ACC" },
 };
 
 /** 마지막 글자에 받침이 있으면 withFinal, 없으면 withoutFinal을 붙인다. 예: 받침(약, "이에요", "예요") */
@@ -37,4 +37,15 @@ export function pillName(drugCode: string, language: "ko" | "ja"): string {
     if (item) return language === "ja" ? item.japaneseName : item.name;
   }
   return language === "ja" ? "別のお薬" : "다른 약";
+}
+
+/** 약에 새겨진 각인 (확인 화면에서 사람이 대조하는 근거). 모르면 null. */
+export function pillImprint(drugCode: string): string | null {
+  const extra = extraPills[drugCode];
+  if (extra) return extra.imprint;
+  for (const items of Object.values(medicationSchedules)) {
+    const item = items.find((candidate) => candidate.drugCode === drugCode);
+    if (item?.imprint) return item.imprint;
+  }
+  return null;
 }

@@ -15,15 +15,15 @@ export type PillReading =
   | { kind: "noPill" }
   | { kind: "multiple" }
   | { kind: "unsure" }
-  | { kind: "pill"; drugCode: string; confidence: number };
+  | { kind: "pill"; drugCode: string; confidence: number; box?: PillDetection["box"] };
 
 export type PillVerdict =
   | { kind: "noPill" } // 알약이 안 보임
   | { kind: "multiple" } // 여러 알이 보임 -> 한 알씩
   | { kind: "unsure" } // 어떤 약인지 확신이 낮음
   | { kind: "checking"; drugCode: string } // 같은 약이 보이는 중, 판정 대기
-  | { kind: "match"; drugCode: string }
-  | { kind: "mismatch"; drugCode: string };
+  | { kind: "match"; drugCode: string; box?: PillDetection["box"] } // box: 화면에서 알약을 확대해 보여줄 때 사용
+  | { kind: "mismatch"; drugCode: string; box?: PillDetection["box"] };
 
 /** 한 프레임의 검출 결과를 읽는다. */
 export function readDetections(detections: readonly PillDetection[]): PillReading {
@@ -32,7 +32,7 @@ export function readDetections(detections: readonly PillDetection[]): PillReadin
   if (found.length > 1) return { kind: "multiple" };
   const [pill] = found;
   if (pill!.confidence < CONFIDENT) return { kind: "unsure" };
-  return { kind: "pill", drugCode: pill!.drugCode, confidence: pill!.confidence };
+  return { kind: "pill", drugCode: pill!.drugCode, confidence: pill!.confidence, box: pill!.box };
 }
 
 export class PillVerdictTracker {
@@ -51,8 +51,8 @@ export class PillVerdictTracker {
     }
     if (timeMs - this.candidate.since < STABLE_MS) return { kind: "checking", drugCode: reading.drugCode };
     return reading.drugCode === this.expectedDrugCode
-      ? { kind: "match", drugCode: reading.drugCode }
-      : { kind: "mismatch", drugCode: reading.drugCode };
+      ? { kind: "match", drugCode: reading.drugCode, box: reading.box }
+      : { kind: "mismatch", drugCode: reading.drugCode, box: reading.box };
   }
 
   reset(): void {
