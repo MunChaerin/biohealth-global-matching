@@ -1,3 +1,6 @@
 # 직접 찍은 알약 사진 (손이 나올 수 있어 레포에 올리지 않음)
 own_photos/
 __pycache__/
+# 학습 기록·가중치 (용량이 커서 레포에 올리지 않음. 웹에서 쓰는 onnx는 public/models/pill/)
+runs/
+*.pt
