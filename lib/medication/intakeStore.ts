@@ -17,6 +17,7 @@ export interface TodayMedication {
   date: string; // YYYY-MM-DD
   items: MedicationStatus[];
   next: MedicationStatus | null; // 아직 안 먹은 약 중 가장 이른 것
+  nextGroup: MedicationStatus[]; // next와 같은 시간에 먹을, 아직 안 먹은 약들 (한 번에 확인)
 }
 
 type Store = Map<string, Map<string, IntakeRecord>>;
@@ -44,7 +45,9 @@ export function getTodayMedication(patientId: string, now: Date = new Date()): T
     const record = records.get(item.id) ?? { mismatchCount: 0 };
     return { ...item, ...record, status: record.takenAt ? "taken" : "pending" };
   });
-  return { date, items, next: items.find((item) => item.status === "pending") ?? null };
+  const next = items.find((item) => item.status === "pending") ?? null;
+  const nextGroup = next ? items.filter((item) => item.status === "pending" && item.time === next.time) : [];
+  return { date, items, next, nextGroup };
 }
 
 /** [먹었어요]. 이미 기록돼 있으면 처음 시각을 유지한다. */

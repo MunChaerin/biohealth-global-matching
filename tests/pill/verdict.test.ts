@@ -50,4 +50,13 @@ describe("PillVerdictTracker", () => {
     expect(tracker.update(500, [amlodipine(0.5)]).kind).toBe("unsure");
     expect(tracker.update(1_000, [amlodipine()]).kind).toBe("checking");
   });
+
+  it("같은 시간에 먹을 약이 여러 개면 그중 하나면 맞음, 남은 약이 바뀌면 다시 센다", () => {
+    const tracker = new PillVerdictTracker(["A", "B"]);
+    tracker.update(0, [metformin()]);
+    expect(tracker.update(STABLE_MS, [metformin()])).toEqual({ kind: "match", drugCode: "B" });
+    tracker.setExpected(["A"]); // B를 먹음
+    expect(tracker.update(STABLE_MS + 100, [metformin()]).kind).toBe("checking");
+    expect(tracker.update(2 * STABLE_MS + 100, [metformin()])).toEqual({ kind: "mismatch", drugCode: "B" });
+  });
 });

@@ -13,6 +13,7 @@ const today: TodayMedication = {
     { ...tylenol!, status: "pending", mismatchCount: 0 },
   ],
   next: { ...tylenol!, status: "pending", mismatchCount: 0 },
+  nextGroup: [{ ...tylenol!, status: "pending", mismatchCount: 0 }],
 };
 
 describe("MedicationStatus", () => {

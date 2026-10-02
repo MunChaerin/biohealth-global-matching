@@ -66,3 +66,8 @@
 .pillEvidence dl { display: grid; gap: 2px; margin: 0; font-size: 12px; }
 .pillEvidence dt { color: #6f888e; font-size: 11px; }
 .pillEvidence dd { margin: 0 0 6px; color: #25474d; font-weight: 700; }
+.pillGroup { display: grid; gap: 4px; margin: 4px 0 0; padding: 0; list-style: none; }
+.pillGroup li { display: flex; flex-direction: column; gap: 1px; }
+.pillGroup b { font-size: 17px; }
+.pillGroup span { color: #476a72; font-size: 12px; }
+.pillGroupDone b, .pillGroupDone span { color: #2d8869; text-decoration: line-through; text-decoration-thickness: 1px; }

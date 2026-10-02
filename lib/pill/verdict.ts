@@ -37,8 +37,18 @@ export function readDetections(detections: readonly PillDetection[]): PillReadin
 
 export class PillVerdictTracker {
   private candidate: { drugCode: string; since: number } | null = null;
+  private expected: Set<string>;
 
-  constructor(private readonly expectedDrugCode: string) {}
+  /** expected: 지금 먹어야 하는 약 코드 (같은 시간에 여러 알이면 여러 개 - 그중 하나면 맞음) */
+  constructor(expected: string | readonly string[]) {
+    this.expected = new Set(typeof expected === "string" ? [expected] : expected);
+  }
+
+  /** 한 알을 먹고 나서 남은 약으로 바꿀 때. 보고 있던 약의 판정은 처음부터 다시 센다. */
+  setExpected(expected: readonly string[]): void {
+    this.expected = new Set(expected);
+    this.candidate = null;
+  }
 
   update(timeMs: number, detections: readonly PillDetection[]): PillVerdict {
     const reading = readDetections(detections);
@@ -50,7 +60,7 @@ export class PillVerdictTracker {
       this.candidate = { drugCode: reading.drugCode, since: timeMs };
     }
     if (timeMs - this.candidate.since < STABLE_MS) return { kind: "checking", drugCode: reading.drugCode };
-    return reading.drugCode === this.expectedDrugCode
+    return this.expected.has(reading.drugCode)
       ? { kind: "match", drugCode: reading.drugCode, box: reading.box }
       : { kind: "mismatch", drugCode: reading.drugCode, box: reading.box };
   }

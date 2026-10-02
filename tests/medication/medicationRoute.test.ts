@@ -19,9 +19,10 @@ describe("/api/medication", () => {
 
   it("오늘 복약 목록을 시간순으로, 처음엔 모두 미복용으로 돌려준다", async () => {
     const { body } = await today();
-    expect(body.items.map((item) => item.time)).toEqual(["08:00", "18:00"]);
+    expect(body.items.map((item) => item.time)).toEqual(["08:00", "08:00", "18:00", "18:00"]);
     expect(body.items.every((item) => item.status === "pending" && item.mismatchCount === 0)).toBe(true);
     expect(body.next?.id).toBe("tanaka-lyribea-am");
+    expect(body.nextGroup.map((item) => item.id)).toEqual(["tanaka-lyribea-am", "tanaka-tylenol-am"]);
   });
 
   it("먹었어요를 기록하면 복용으로 바뀌고 다음 약으로 넘어간다", async () => {
@@ -31,7 +32,8 @@ describe("/api/medication", () => {
     const taken = body.items.find((item) => item.id === "tanaka-lyribea-am");
     expect(taken?.status).toBe("taken");
     expect(taken?.takenAt).toEqual(expect.any(String));
-    expect(body.next?.id).toBe("tanaka-tylenol-pm");
+    expect(body.next?.id).toBe("tanaka-tylenol-am");
+    expect(body.nextGroup.map((item) => item.id)).toEqual(["tanaka-tylenol-am"]); // 아침에 남은 약
   });
 
   it("두 번 눌러도 처음 복용 시각을 유지한다", async () => {

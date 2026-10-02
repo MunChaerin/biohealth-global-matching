@@ -19,9 +19,11 @@ export interface MedicationItem {
 }
 
 export const medicationSchedules: Record<string, MedicationItem[]> = {
-  // 시연 환자: 우측 하지 저림(신경병증성 통증) -> 아침 프레가발린, 저녁 아세트아미노펜
+  // 시연 환자: 우측 하지 저림(신경병증성 통증) -> 아침·저녁 프레가발린 + 아세트아미노펜 (같은 시간에 2알, 한 알씩 확인)
   "tanaka-haruko": [
     { id: "tanaka-lyribea-am", drugCode: "K-045037", name: "리리베아캡슐 50mg", japaneseName: "リリベアカプセル50mg", appearance: "흰색 길쭉한 캡슐 (DWB PGN50)", japaneseAppearance: "白い長いカプセル（DWB PGN50）", dose: "1캡슐", japaneseDose: "1カプセル", imprint: "DWB PGN 50", time: "08:00" },
+    { id: "tanaka-tylenol-am", drugCode: "K-004378", name: "타이레놀정 500mg", japaneseName: "タイレノール錠500mg", appearance: "흰색 길쭉한 알약", japaneseAppearance: "白い長い錠剤", dose: "1알", japaneseDose: "1錠", imprint: "TYLENOL / 500", time: "08:00" },
+    { id: "tanaka-lyribea-pm", drugCode: "K-045037", name: "리리베아캡슐 50mg", japaneseName: "リリベアカプセル50mg", appearance: "흰색 길쭉한 캡슐 (DWB PGN50)", japaneseAppearance: "白い長いカプセル（DWB PGN50）", dose: "1캡슐", japaneseDose: "1カプセル", imprint: "DWB PGN 50", time: "18:00" },
     { id: "tanaka-tylenol-pm", drugCode: "K-004378", name: "타이레놀정 500mg", japaneseName: "タイレノール錠500mg", appearance: "흰색 길쭉한 알약", japaneseAppearance: "白い長い錠剤", dose: "1알", japaneseDose: "1錠", imprint: "TYLENOL / 500", time: "18:00" },
   ],
   "kim-sunja": [

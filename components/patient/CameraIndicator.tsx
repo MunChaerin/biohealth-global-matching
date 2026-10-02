@@ -58,10 +58,10 @@ const messages: Record<ChatLanguage, Record<Exclude<CameraStatus, "off">, { text
  */
 /** 알약 확인 모드로 열 때 넘긴다. 이 동안 카드가 커지고 표정 분석은 잠시 멈춘다. */
 export interface PillCheckRequest {
-  medication: MedicationItem;
+  medications: MedicationItem[]; // 이번 복용 시간에 먹을 약 (한 알씩 확인)
   debug?: boolean; // 모델 없이 버튼으로 화면 흐름 확인 (?pillDebug=1)
   onClose: () => void;
-  onTaken: () => void;
+  onTaken: (item: MedicationItem) => void;
   speak?: (text: string) => void; // 약 확인 결과 음성 안내
 }
 
@@ -71,14 +71,19 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
   const [mouthStatus, setMouthStatus] = useState<MouthAssistStatus>("waiting");
   // 표정 관찰에 동의하지 않은 환자도 알약 확인할 때는 그때만 카메라를 켤 수 있다
   const [pillCameraAllowed, setPillCameraAllowed] = useState(false);
+  // 이번 약 확인에서 [먹었어요]를 누른 약 (같은 시간에 여러 알일 때 남은 약을 계속 확인)
+  const [takenIds, setTakenIds] = useState<string[]>([]);
   const pillMode = !!pillCheck;
+  const pillGroup = pillCheck?.medications ?? [];
+  const remainingPills = pillGroup.filter((item) => !takenIds.includes(item.id));
   const cameraEnabled = consent === "on" || (pillMode && pillCameraAllowed);
   const analysis: ExpressionAnalysis = pillMode ? (consent === "on" ? "paused" : "off") : "on";
   const { videoRef, status, previewFilter, correctedFrame } = useFaceExpression(cameraEnabled, patientId, setMouthStatus, analysis);
   const cameraWorking = cameraEnabled && status !== "off" && status !== "starting" && status !== "permissionDenied" && status !== "unavailable";
   const pill = usePillCheck({
     active: pillMode && cameraWorking,
-    medication: pillCheck?.medication ?? null,
+    medications: remainingPills,
+    takenCodes: pillGroup.filter((item) => takenIds.includes(item.id)).map((item) => item.drugCode),
     patientId,
     videoRef,
     correctedFrame,
@@ -86,7 +91,10 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
   });
 
   useEffect(() => {
-    if (!pillMode) setPillCameraAllowed(false); // 알약 확인이 끝나면 다음 확인 때 다시 묻는다
+    if (!pillMode) {
+      setPillCameraAllowed(false); // 알약 확인이 끝나면 다음 확인 때 다시 묻는다
+      setTakenIds([]);
+    }
   }, [pillMode]);
 
   useEffect(() => {
@@ -142,15 +150,19 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
       {pillCheck ? (
         <PillCheckPanel
           language={language}
-          medication={pillCheck.medication}
+          group={pillGroup}
+          takenIds={takenIds}
           phase={pill.phase}
           verdict={pill.verdict}
           cameraProblem={cameraProblem}
           needsCameraConsent={!cameraEnabled}
           onAllowCamera={() => setPillCameraAllowed(true)}
-          onTaken={async () => {
-            const ok = await pill.confirmTaken();
-            if (ok) pillCheck.onTaken();
+          onTaken={async (item) => {
+            const ok = await pill.confirmTaken(item);
+            if (ok) {
+              setTakenIds((ids) => [...ids, item.id]);
+              pillCheck.onTaken(item);
+            }
             return ok;
           }}
           onClose={pillCheck.onClose}

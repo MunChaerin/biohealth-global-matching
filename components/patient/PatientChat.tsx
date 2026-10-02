@@ -36,7 +36,7 @@ export function PatientChat() {
   const [largeText, setLargeText] = useState(false);
   const [explanation, setExplanation] = useState<string | null>(null);
   const medication = useTodayMedication(persona.id);
-  const [pillCheckMedication, setPillCheckMedication] = useState<MedicationItem | null>(null);
+  const [pillCheckGroup, setPillCheckGroup] = useState<MedicationItem[] | null>(null);
   const [pillDebug, setPillDebug] = useState(false);
   useEffect(() => {
     // 알약 인식 모델 없이 화면 흐름을 확인하는 개발용 모드 (?pillDebug=1)
@@ -136,10 +136,10 @@ export function PatientChat() {
             language={language}
             patientId={persona.id}
             speechAssistActive={speech.isListening}
-            pillCheck={pillCheckMedication ? {
-              medication: pillCheckMedication,
+            pillCheck={pillCheckGroup ? {
+              medications: pillCheckGroup,
               debug: pillDebug,
-              onClose: () => setPillCheckMedication(null),
+              onClose: () => setPillCheckGroup(null),
               onTaken: () => void medication.refresh(),
               speak: speech.speak,
             } : null}
@@ -149,17 +149,19 @@ export function PatientChat() {
 
       <div className={styles.bottomGrid}><section className={styles.medicineCard}>{(() => {
         const next = medication.today?.next ?? null;
+        const group = medication.today?.nextGroup ?? [];
         const allTaken = !!medication.today && medication.today.items.length > 0 && !next;
-        const nextName = next ? (isJapanese ? next.japaneseName : next.name) : null;
+        // 같은 시간에 먹을 약을 한 줄로 (예: 리리베아캡슐 50mg 1캡슐 · 타이레놀정 500mg 1알)
+        const nextName = group.length ? group.map((item) => `${isJapanese ? item.japaneseName : item.name} ${isJapanese ? item.japaneseDose : item.dose}`).join(" · ") : null;
         return <>
           <div className={styles.cardHeading}><div><p>{copy.medicine}</p>
-            <h2>{nextName ? `${nextName} ${isJapanese ? next!.japaneseDose : next!.dose}` : allTaken ? (isJapanese ? "今日のお薬はすべて飲みました" : "오늘 약을 모두 드셨어요") : copy.medicineName}</h2>
-            <small>{next ? `${next.time} · ${isJapanese ? next.japaneseAppearance : next.appearance}` : medication.failed ? (isJapanese ? "服薬予定を読み込めませんでした" : "복약 일정을 불러오지 못했어요") : copy.medicineTime}</small>
+            <h2>{nextName ? nextName : allTaken ? (isJapanese ? "今日のお薬はすべて飲みました" : "오늘 약을 모두 드셨어요") : copy.medicineName}</h2>
+            <small>{next ? `${next.time} · ${group.length > 1 ? (isJapanese ? `${group.length}錠を1錠ずつ確認します` : `${group.length}알을 한 알씩 확인해요`) : isJapanese ? next.japaneseAppearance : next.appearance}` : medication.failed ? (isJapanese ? "服薬予定を読み込めませんでした" : "복약 일정을 불러오지 못했어요") : copy.medicineTime}</small>
           </div><span className={styles.medicineIcon}>＋</span></div>
           <div className={styles.medicineAction}><span>{next ? (isJapanese ? "飲む前にカメラでお薬を確認します。" : "드시기 전에 카메라로 약을 확인해요.") : copy.medicineHint}</span>
             {allTaken
               ? <button type="button" className={styles.completed} disabled>{copy.takenDone}</button>
-              : <button type="button" onClick={() => next && setPillCheckMedication(next)} disabled={!next || !!pillCheckMedication}>{copy.taken}</button>}
+              : <button type="button" onClick={() => group.length && setPillCheckGroup(group)} disabled={!group.length || !!pillCheckGroup}>{copy.taken}</button>}
           </div>
         </>;
       })()}</section><section className={styles.easyPlanCard}><div className={styles.planTitle}><span>♡</span><div><p>{copy.planLabel}</p><h2>{explanation ? (isJapanese ? "医療スタッフからの説明" : "의료진이 보낸 설명") : copy.planTitle}</h2></div></div><p>{explanation ?? copy.planText}</p><button type="button" onClick={() => speech.speak(explanation ?? copy.planText)}>{copy.listen}</button></section></div>

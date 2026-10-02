@@ -45,19 +45,30 @@ async function postMedicationEvent(body: Record<string, string>): Promise<boolea
 }
 
 /**
- * 알약 확인 모드. 카메라 영상을 주기적으로 알약 인식 모델에 넣고, 지금 먹어야 하는 약과 비교한 판정을 돌려준다.
- * 다른 약으로 판정되면 그 약이 사라졌다 다시 나오기 전까지 한 번만 의료진 기록에 남긴다.
+ * 알약 확인 모드. 카메라 영상을 주기적으로 알약 인식 모델에 넣고, 지금 먹어야 하는 약(같은 시간에 여러 알이면
+ * 아직 안 먹은 약 중 하나)과 비교한 판정을 돌려준다. 한 알씩 비추고, 한 알을 먹으면 남은 약으로 계속 확인한다.
+ * 다른 약으로 판정되면 그 약이 사라졌다 다시 나오기 전까지 한 번만 의료진 기록에 남긴다
+ * (방금 먹은 약을 다시 비춘 경우는 남기지 않는다).
  * debug면 모델 대신 버튼으로 보이는 약을 정한다 (?pillDebug=1, 모델 학습 전 화면 흐름 확인용).
  */
 export function usePillCheck(options: {
   active: boolean;
-  medication: MedicationItem | null;
+  medications: readonly MedicationItem[]; // 이번 복용 시간에 아직 안 먹은 약
+  takenCodes?: readonly string[]; // 이번 확인에서 이미 먹었다고 누른 약 코드
   patientId: string;
   videoRef: RefObject<HTMLVideoElement | null>;
   correctedFrame: RefObject<((video: HTMLVideoElement) => HTMLVideoElement | HTMLCanvasElement) | null>;
   debug?: boolean;
 }) {
-  const { active, medication, patientId, videoRef, correctedFrame, debug = false } = options;
+  const { active, medications, takenCodes = [], patientId, videoRef, correctedFrame, debug = false } = options;
+  // 남은 약은 한 알 먹을 때마다 바뀌지만 카메라·모델은 그대로 두어야 해서 ref로 읽는다
+  const medicationsRef = useRef(medications);
+  medicationsRef.current = medications;
+  const takenRef = useRef(takenCodes);
+  takenRef.current = takenCodes;
+  const trackerRef = useRef<PillVerdictTracker | null>(null);
+  const expectedKey = medications.map((item) => item.drugCode).join(",");
+  const hasMedications = medications.length > 0;
   const [phase, setPhase] = useState<PillCheckPhase>("loading");
   const [verdict, setVerdict] = useState<PillVerdict>({ kind: "noPill" });
   // 판정 근거로 보여줄, 카메라로 본 알약 확대 사진
@@ -65,13 +76,14 @@ export function usePillCheck(options: {
   const debugRecognizerRef = useRef<DebugPillRecognizer | null>(null);
 
   useEffect(() => {
-    if (!active || !medication) return;
+    if (!active || !hasMedications) return;
     let cancelled = false;
     let recognizer: PillRecognizer | null = null;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let reportedMismatch: string | null = null;
     let evidenceCode: string | null = null;
-    const tracker = new PillVerdictTracker(medication.drugCode);
+    const tracker = new PillVerdictTracker(medicationsRef.current.map((item) => item.drugCode));
+    trackerRef.current = tracker;
     setPhase("loading");
     setVerdict({ kind: "noPill" });
     setEvidence(null);
@@ -97,9 +109,10 @@ export function usePillCheck(options: {
         } else if (next.kind === "noPill") {
           evidenceCode = null;
         }
-        if (next.kind === "mismatch" && reportedMismatch !== next.drugCode) {
+        const remaining = medicationsRef.current;
+        if (next.kind === "mismatch" && reportedMismatch !== next.drugCode && !takenRef.current.includes(next.drugCode) && remaining[0]) {
           reportedMismatch = next.drugCode;
-          void postMedicationEvent({ patientId, medicationId: medication!.id, event: "mismatch", detectedDrugCode: next.drugCode });
+          void postMedicationEvent({ patientId, medicationId: remaining[0].id, event: "mismatch", detectedDrugCode: next.drugCode });
         } else if (next.kind !== "mismatch" && next.kind !== "checking") {
           reportedMismatch = null; // 약을 내려놓으면 다음에 다시 비출 때 새로 센다
         }
@@ -135,13 +148,19 @@ export function usePillCheck(options: {
       if (timer) clearTimeout(timer);
       recognizer?.close();
       debugRecognizerRef.current = null;
+      trackerRef.current = null;
     };
-  }, [active, medication, patientId, videoRef, correctedFrame, debug]);
+  }, [active, hasMedications, patientId, videoRef, correctedFrame, debug]);
 
-  /** [먹었어요] - 맞는 약으로 판정됐을 때만 누를 수 있다. */
-  async function confirmTaken(): Promise<boolean> {
-    if (!medication) return false;
-    return postMedicationEvent({ patientId, medicationId: medication.id, event: "taken" });
+  // 한 알을 먹어서 남은 약이 바뀌면 판정 기준만 바꾼다 (보고 있던 약은 처음부터 다시 판정)
+  useEffect(() => {
+    trackerRef.current?.setExpected(expectedKey ? expectedKey.split(",") : []);
+    setEvidence(null);
+  }, [expectedKey]);
+
+  /** [먹었어요] - 맞는 약으로 판정됐을 때 그 약을 복용으로 기록한다. */
+  async function confirmTaken(item: MedicationItem): Promise<boolean> {
+    return postMedicationEvent({ patientId, medicationId: item.id, event: "taken" });
   }
 
   /** 개발용: 보이는 약을 직접 정한다. */
