@@ -10,6 +10,10 @@ export interface PillDetection {
 export const DETECT_MIN_CONFIDENCE = 0.4; // 이보다 낮은 검출은 알약으로 보지 않음
 export const CONFIDENT = 0.6; // 이보다 낮으면 어떤 약인지 "잘 모르겠어요" (학습한 10종 밖의 약 오인 방지)
 export const STABLE_MS = 1_000; // 같은 약이 이만큼 이어져야 판정
+// "다른 약"은 더 엄격하게: 배경(잠옷 무늬 등)을 0.7대로 꾸준히 약으로 착각한 경우가 있었고,
+// 잘못된 "다른 약" 기록이 의료진에게 가는 게 가장 비싼 실수라서. 기준에 못 미치면 "잘 모르겠어요"로 둔다.
+export const MISMATCH_CONFIDENT = 0.8;
+export const MISMATCH_STABLE_MS = 2_000;
 export const RELATIVE_MIN = 0.75; // 가장 확신 높은 박스의 이 비율보다 약한 박스는 다른 알약으로 세지 않음 (배경 착각 등)
 
 export type PillReading =
@@ -64,11 +68,16 @@ export class PillVerdictTracker {
       this.candidate = null;
       return reading;
     }
+    const expected = this.expected.has(reading.drugCode);
+    if (!expected && reading.confidence < MISMATCH_CONFIDENT) {
+      this.candidate = null;
+      return { kind: "unsure" };
+    }
     if (this.candidate?.drugCode !== reading.drugCode) {
       this.candidate = { drugCode: reading.drugCode, since: timeMs };
     }
-    if (timeMs - this.candidate.since < STABLE_MS) return { kind: "checking", drugCode: reading.drugCode };
-    return this.expected.has(reading.drugCode)
+    if (timeMs - this.candidate.since < (expected ? STABLE_MS : MISMATCH_STABLE_MS)) return { kind: "checking", drugCode: reading.drugCode };
+    return expected
       ? { kind: "match", drugCode: reading.drugCode, confidence: reading.confidence, box: reading.box }
       : { kind: "mismatch", drugCode: reading.drugCode, confidence: reading.confidence, box: reading.box };
   }

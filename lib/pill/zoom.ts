@@ -47,7 +47,8 @@ export interface ZoomedDetections {
 
 /**
  * 가이드 네모 안에서 찾고, 알약이 한 알인데 작으면 그 주변을 더 확대해서 다시 찾는다.
- * 확대한 쪽에서 한 알이 보이면 그 결과를 쓴다 (학습 때와 같은 크기라 더 믿을 만함).
+ * 확대한 쪽에서 한 알이 보이고, 네모에서 본 약과 같거나 확신이 더 높을 때만 확대 결과를 쓴다
+ * (네모 리리베아 0.78 -> 확대 무스판정 0.62처럼 맞는 답이 더 약한 틀린 답으로 뒤집히는 것 방지).
  */
 export async function detectWithZoom(recognizer: PillRecognizer, frame: HTMLVideoElement | HTMLCanvasElement): Promise<ZoomedDetections> {
   const width = frame instanceof HTMLVideoElement ? frame.videoWidth : frame.width;
@@ -59,7 +60,10 @@ export async function detectWithZoom(recognizer: PillRecognizer, frame: HTMLVide
   if (!region) return { detections: inGuide, guide: inGuide, zoomed: null };
 
   const zoomed = await recognizer.detect(frame, region);
-  return { detections: pillsInFrame(zoomed).length === 1 ? zoomed : inGuide, guide: inGuide, zoomed };
+  const [zoomedPill, ...others] = pillsInFrame(zoomed);
+  const before = pills[0]!;
+  const useZoomed = Boolean(zoomedPill) && others.length === 0 && (zoomedPill!.drugCode === before.drugCode || zoomedPill!.confidence > before.confidence);
+  return { detections: useZoomed ? zoomed : inGuide, guide: inGuide, zoomed };
 }
 
 /** 개발용 로그 한 줄: "네모 무스판정 0.70 -> 확대 타이레놀정 0.88" */

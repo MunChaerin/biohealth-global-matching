@@ -61,6 +61,16 @@ describe("detectWithZoom", () => {
     expect(detect).toHaveBeenCalledTimes(2);
   });
 
+  it("확대 결과가 다른 약이면서 더 약하면 쓰지 않는다 (맞는 답이 뒤집히는 것 방지)", async () => {
+    const lyribea = { drugCode: "K-045037", confidence: 0.78, box: [0.45, 0.45, 0.05, 0.05] as const };
+    const weakMuspan = { ...muspan, confidence: 0.62 };
+    const { recognizer } = fakeRecognizer([lyribea], [weakMuspan]);
+    expect((await detectWithZoom(recognizer, frame)).detections).toEqual([lyribea]);
+
+    const sameDrug = fakeRecognizer([lyribea], [{ ...lyribea, confidence: 0.7 }]);
+    expect((await detectWithZoom(sameDrug.recognizer, frame)).detections[0]!.confidence).toBe(0.7); // 같은 약이면 확대 쪽(정확한 박스)
+  });
+
   it("여러 알이 보이거나 확대해도 한 알이 아니면 네모 결과를 쓴다", async () => {
     const two = fakeRecognizer([muspan, tylenol], [tylenol]);
     expect((await detectWithZoom(two.recognizer, frame)).detections).toHaveLength(2);
