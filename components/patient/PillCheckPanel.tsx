@@ -118,7 +118,10 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
         speechKey = "multiple";
         break;
       case "unsure":
-        status = ja ? "どのお薬かよく分かりません。もう少し近づけて、明るいところで見せてください。" : "어떤 약인지 잘 모르겠어요. 조금 더 가까이, 밝은 곳에서 비춰 주세요.";
+        // 글자 없는 면(예: 캡슐 뒷면)만 보이면 비슷한 약과 구분이 안 되므로 각인이 보이게 돌려 달라고 한다
+        status = ja
+          ? "どのお薬かよく分かりません。お薬に刻まれた文字がカメラに見えるように向きを変えて、近づけて見せてください。"
+          : "어떤 약인지 잘 모르겠어요. 약에 새겨진 글자가 카메라 쪽으로 보이게 돌려서, 가까이 비춰 주세요.";
         speechKey = "unsure";
         break;
       case "checking":
