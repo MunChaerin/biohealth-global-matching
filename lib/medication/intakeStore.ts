@@ -1,12 +1,17 @@
+import type { PillRecognitionResult } from "../pill/result";
 import { getMedicationSchedule, type MedicationItem } from "./schedule";
 
 // 오늘 복약 기록. 지금은 서버 메모리 (카메라 결과처럼 데모용 - 서버 재시작 시 사라짐).
 // 날짜는 한국·일본 시간(UTC+9) 기준으로 나눈다.
 
+export type IntakeMethod = "camera" | "manual"; // 카메라로 약을 확인하고 기록 / 인식이 안 돼서 직접 기록
+
 export interface IntakeRecord {
   takenAt?: string; // [먹었어요]를 누른 시각
+  method?: IntakeMethod;
   mismatchCount: number; // 다른 약을 비춘 횟수
   lastMismatch?: { detectedDrugCode: string; at: string };
+  lastRecognition?: PillRecognitionResult; // 이 약을 확인할 때 마지막으로 받은 인식 결과
 }
 
 export interface MedicationStatus extends MedicationItem, IntakeRecord {
@@ -50,22 +55,23 @@ export function getTodayMedication(patientId: string, now: Date = new Date()): T
   return { date, items, next, nextGroup };
 }
 
-/** [먹었어요]. 이미 기록돼 있으면 처음 시각을 유지한다. */
-export function recordTaken(patientId: string, medicationId: string, now: Date = new Date()): void {
+/** [먹었어요]. 이미 기록돼 있으면 처음 시각을 유지한다. 인식만으로는 기록하지 않는다. */
+export function recordTaken(patientId: string, medicationId: string, method: IntakeMethod = "camera", now: Date = new Date()): void {
   const records = dayRecords(patientId, dateKey(now));
   const record = records.get(medicationId) ?? { mismatchCount: 0 };
-  if (!record.takenAt) records.set(medicationId, { ...record, takenAt: now.toISOString() });
+  if (!record.takenAt) records.set(medicationId, { ...record, takenAt: now.toISOString(), method });
 }
 
-/** 지금 먹어야 하는 약이 아닌 다른 약을 비췄을 때. */
-export function recordMismatch(patientId: string, medicationId: string, detectedDrugCode: string, now: Date = new Date()): void {
+/** 알약 인식 결과(사진 없음). 다른 약(mismatched)이면 의료진 화면에 보이도록 횟수와 마지막 약을 센다. */
+export function recordRecognition(patientId: string, medicationId: string, result: PillRecognitionResult, now: Date = new Date()): void {
   const records = dayRecords(patientId, dateKey(now));
   const record = records.get(medicationId) ?? { mismatchCount: 0 };
-  records.set(medicationId, {
-    ...record,
-    mismatchCount: record.mismatchCount + 1,
-    lastMismatch: { detectedDrugCode, at: now.toISOString() },
-  });
+  const next: IntakeRecord = { ...record, lastRecognition: result };
+  if (result.status === "mismatched" && result.medicationCode) {
+    next.mismatchCount = record.mismatchCount + 1;
+    next.lastMismatch = { detectedDrugCode: result.medicationCode, at: result.measuredAt };
+  }
+  records.set(medicationId, next);
 }
 
 export function clearMedicationIntakes(): void {

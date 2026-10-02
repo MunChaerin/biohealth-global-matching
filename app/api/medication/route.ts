@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { demoGuard, demoModeEnabled } from "../../../lib/demoGuard";
-import { getTodayMedication, recordMismatch, recordTaken } from "../../../lib/medication/intakeStore";
+import { getTodayMedication, recordRecognition, recordTaken } from "../../../lib/medication/intakeStore";
+import { validateRecognitionResult } from "../../../lib/pill/result";
 import { findMedication } from "../../../lib/medication/schedule";
 
 export const runtime = "nodejs";
@@ -20,10 +21,13 @@ interface MedicationEventBody {
   patientId?: unknown;
   medicationId?: unknown;
   event?: unknown;
-  detectedDrugCode?: unknown;
+  method?: unknown;
+  result?: unknown;
 }
 
-// event: "taken"(맞는 약 확인 후 [먹었어요]) | "mismatch"(다른 약을 비춤)
+// event:
+//   "taken"       [먹었어요] - method "camera"(카메라로 맞는 약 확인 후) | "manual"(인식이 안 돼 직접 기록)
+//   "recognition" 알약 인식 결과 PillRecognitionResult (사진·영상 없이 판정 결과만)
 export async function POST(request: Request) {
   if (!demoModeEnabled()) return demoGuard(null)!;
 
@@ -43,14 +47,23 @@ export async function POST(request: Request) {
   }
 
   if (body.event === "taken") {
-    recordTaken(patientId!, body.medicationId);
-  } else if (body.event === "mismatch") {
-    if (typeof body.detectedDrugCode !== "string" || !body.detectedDrugCode) {
-      return NextResponse.json({ error: "detectedDrugCode가 필요합니다." }, { status: 400 });
+    const method = body.method ?? "camera";
+    if (method !== "camera" && method !== "manual") {
+      return NextResponse.json({ error: "method는 camera 또는 manual이어야 합니다." }, { status: 400 });
     }
-    recordMismatch(patientId!, body.medicationId, body.detectedDrugCode);
+    recordTaken(patientId!, body.medicationId, method);
+  } else if (body.event === "recognition") {
+    try {
+      validateRecognitionResult(body.result);
+    } catch (error) {
+      return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+    }
+    if (body.result.patientId !== patientId) {
+      return NextResponse.json({ error: "result.patientId가 patientId와 다릅니다." }, { status: 400 });
+    }
+    recordRecognition(patientId!, body.medicationId, body.result);
   } else {
-    return NextResponse.json({ error: "event는 taken 또는 mismatch여야 합니다." }, { status: 400 });
+    return NextResponse.json({ error: "event는 taken 또는 recognition이어야 합니다." }, { status: 400 });
   }
 
   return NextResponse.json(getTodayMedication(patientId!));

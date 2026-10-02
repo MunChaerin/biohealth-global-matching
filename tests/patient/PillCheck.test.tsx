@@ -21,11 +21,12 @@ function mockCamera() {
   return { getUserMedia, track };
 }
 
-function medicationPosts() {
+function medicationPosts(event?: string) {
   return vi
     .mocked(fetch)
     .mock.calls.filter(([url, init]) => url === "/api/medication" && (init as RequestInit | undefined)?.method === "POST")
-    .map(([, init]) => JSON.parse(String((init as RequestInit).body)));
+    .map(([, init]) => JSON.parse(String((init as RequestInit).body)))
+    .filter((body) => !event || body.event === event);
 }
 
 /** 개발용 인식기로 약을 보여주고, 판정에 필요한 1초가 지나도록 시간을 넘긴다. */
@@ -79,7 +80,7 @@ describe("알약 확인 모드", () => {
     // 타이레놀부터 (순서 상관없음)
     await showPill("타이레놀정 500mg");
     expect(await screen.findByText(/맞아요! 타이레놀정 500mg이에요/)).toBeInTheDocument();
-    expect(medicationPosts()).toHaveLength(0); // 비추기만으로는 기록하지 않음
+    expect(medicationPosts("taken")).toHaveLength(0); // 비추기만으로는 복용 기록을 하지 않음
     fireEvent.click(screen.getByRole("button", { name: "먹었어요" }));
     expect(await screen.findByText(/복용을 기록했어요. 이제 리리베아캡슐 50mg/)).toBeInTheDocument();
     expect(onTaken).toHaveBeenCalledWith(tylenol);
@@ -88,17 +89,25 @@ describe("알약 확인 모드", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
     });
-    expect(medicationPosts().filter((body) => body.event === "mismatch")).toHaveLength(0);
+    expect(medicationPosts("recognition").filter((body) => body.result.status === "mismatched")).toHaveLength(0);
 
     // 리리베아
     await showPill("리리베아캡슐 50mg");
     expect(await screen.findByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "먹었어요" }));
     expect(await screen.findByText("이번 약을 모두 드셨어요. 기록했어요.")).toBeInTheDocument();
-    expect(medicationPosts()).toEqual([
-      { patientId: "tanaka-haruko", medicationId: tylenol.id, event: "taken" },
-      { patientId: "tanaka-haruko", medicationId: lyribea.id, event: "taken" },
+    expect(medicationPosts("taken")).toEqual([
+      { patientId: "tanaka-haruko", medicationId: tylenol.id, event: "taken", method: "camera" },
+      { patientId: "tanaka-haruko", medicationId: lyribea.id, event: "taken", method: "camera" },
     ]);
+    // 맞는 약 인식 결과는 약마다 한 번씩, 사진 없이 규격 필드만
+    const matched = medicationPosts("recognition");
+    expect(matched.map((body) => [body.medicationId, body.result.status, body.result.medicationCode])).toEqual([
+      [tylenol.id, "matched", tylenol.drugCode],
+      [lyribea.id, "matched", lyribea.drugCode],
+    ]);
+    expect(Object.keys(matched[0].result).sort()).toEqual(["confidence", "expectedMedicationCode", "measuredAt", "medicationCode", "modelVersion", "patientId", "status"]);
+    expect(matched[0].result).toMatchObject({ patientId: "tanaka-haruko", expectedMedicationCode: tylenol.drugCode, confidence: 0.92, modelVersion: "debug" });
   });
 
   it("다른 약이면 안내하고, 같은 약을 계속 비춰도 의료진 기록은 한 번만 남긴다", async () => {
@@ -112,9 +121,12 @@ describe("알약 확인 모드", () => {
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
     });
-    const mismatches = medicationPosts();
-    expect(mismatches).toHaveLength(1);
-    expect(mismatches[0]).toMatchObject({ event: "mismatch", detectedDrugCode: "K-005849", medicationId: lyribea.id });
+    const results = medicationPosts("recognition");
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      medicationId: lyribea.id,
+      result: { status: "mismatched", medicationCode: "K-005849", expectedMedicationCode: lyribea.drugCode, confidence: 0.9 },
+    });
     expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
   });
 

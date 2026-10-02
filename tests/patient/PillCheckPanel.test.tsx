@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { PillCheckPanel } from "../../components/patient/PillCheckPanel";
+import { MANUAL_OFFER_MS, PillCheckPanel } from "../../components/patient/PillCheckPanel";
 import { getMedicationSchedule } from "../../lib/medication/schedule";
 import type { PillVerdict } from "../../lib/pill/verdict";
 
@@ -43,7 +43,7 @@ describe("PillCheckPanel - 같은 시간에 2알을 한 알씩", () => {
     const onTaken = vi.fn(async () => true);
     const { rerender } = render(panel({ kind: "match", drugCode: tylenol.drugCode, box }, { speak, onTaken }));
     fireEvent.click(screen.getByRole("button", { name: "먹었어요" }));
-    expect(onTaken).toHaveBeenCalledWith(tylenol);
+    expect(onTaken).toHaveBeenCalledWith(tylenol, "camera");
     // 부모가 먹은 약을 표시하면
     rerender(panel({ kind: "checking", drugCode: tylenol.drugCode }, { speak, onTaken, takenIds: [tylenol.id] }));
     expect(await screen.findByText("복용을 기록했어요. 이제 리리베아캡슐 50mg(흰색 길쭉한 캡슐 (DWB PGN50))을 비춰 주세요.")).toBeInTheDocument();
@@ -85,5 +85,33 @@ describe("PillCheckPanel 판단 근거", () => {
     expect(screen.getByText("무스판정 · 각인 MSP 500")).toBeInTheDocument();
     expect(screen.getByText("리리베아캡슐 50mg · 각인 DWB PGN 50")).toBeInTheDocument();
     expect(screen.getByText("타이레놀정 500mg · 각인 TYLENOL / 500")).toBeInTheDocument();
+  });
+});
+
+describe("PillCheckPanel 인식이 안 될 때 직접 기록", () => {
+  it("모델을 쓸 수 없으면 카메라 없이 직접 기록할 수 있고, manual로 기록한다", () => {
+    const onTaken = vi.fn(async () => true);
+    render(panel({ kind: "noPill" }, { phase: "error", onTaken }));
+    fireEvent.click(screen.getByRole("button", { name: "카메라 없이 직접 기록하기" }));
+    expect(screen.getByText(/의료진에게는 "직접 기록"으로 보여요/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "리리베아캡슐 50mg을 먹었어요" }));
+    expect(onTaken).toHaveBeenCalledWith(lyribea, "manual");
+  });
+
+  it("카메라가 정상이면 처음엔 직접 기록을 보여주지 않고, 한참 알아보지 못하면 보여준다", () => {
+    vi.useFakeTimers();
+    try {
+      render(panel({ kind: "unsure" }));
+      expect(screen.queryByRole("button", { name: "카메라 없이 직접 기록하기" })).not.toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(MANUAL_OFFER_MS));
+      expect(screen.getByRole("button", { name: "카메라 없이 직접 기록하기" })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("맞는 약이 보이면 직접 기록 대신 [먹었어요]만 보여준다", () => {
+    render(panel({ kind: "match", drugCode: lyribea.drugCode, box }, { cameraProblem: "카메라를 쓸 수 없어요." }));
+    expect(screen.queryByRole("button", { name: "카메라 없이 직접 기록하기" })).not.toBeInTheDocument();
   });
 });

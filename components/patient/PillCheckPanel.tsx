@@ -17,7 +17,7 @@ interface Props {
   cameraProblem: string | null; // 카메라를 쓸 수 없을 때 안내 문구
   needsCameraConsent: boolean; // 표정 관찰 카메라에 동의하지 않아서, 알약 확인용으로만 켤지 물어야 함
   onAllowCamera: () => void;
-  onTaken: (item: MedicationItem) => Promise<boolean>;
+  onTaken: (item: MedicationItem, method: "camera" | "manual") => Promise<boolean>;
   onClose: () => void;
   debugShow?: (detections: PillDetection[]) => void;
   evidence?: { drugCode: string; image: string } | null; // 카메라로 본 알약 확대 사진 (판정 근거)
@@ -25,16 +25,20 @@ interface Props {
 }
 
 const REPEAT_HINT_MS = 6_000; // "한 알씩", "잘 모르겠어요" 같은 안내를 다시 읽어주기까지 최소 간격
+export const MANUAL_OFFER_MS = 8_000; // 이만큼 계속 알아보지 못하면 직접 기록 버튼을 보여준다
 
 /**
  * 알약 확인 모드 안내. 같은 시간에 먹을 약이 여러 알이면 한 알씩 아무 순서로 확인한다.
  * 맞는 약일 때만 [먹었어요]를 누를 수 있고, 눌러야 복용으로 기록된다. 안내는 화면 문구와 음성으로 함께 준다.
+ * 모델·카메라를 쓸 수 없거나 한참 동안 약을 알아보지 못하면 카메라 없이 직접 기록할 수 있다 (의료진 화면에 "직접 기록"으로 표시).
  */
 export function PillCheckPanel({ language, group, takenIds, phase, verdict, cameraProblem, needsCameraConsent, onAllowCamera, onTaken, onClose, debugShow, evidence, speak }: Props) {
   const ja = language === "ja";
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
   const [justSaved, setJustSaved] = useState<string | null>(null); // 방금 [먹었어요]를 누른 약 코드
+  const [struggling, setStruggling] = useState(false); // 한참 동안 "잘 모르겠어요"/"한 알씩"만 나옴
+  const [manualOpen, setManualOpen] = useState(false);
 
   const label = (item: MedicationItem) => (ja ? item.japaneseName : item.name);
   const dose = (item: MedicationItem) => (ja ? item.japaneseDose : item.dose);
@@ -49,10 +53,18 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
     if (justSaved && !(("drugCode" in verdict) && verdict.drugCode === justSaved)) setJustSaved(null);
   }, [verdict, justSaved]);
 
-  async function taken(item: MedicationItem) {
+  // 알아보지 못하는 상태가 계속되면 직접 기록을 제안한다 (한 번 보이면 이번 확인 동안 유지)
+  const unclear = verdict.kind === "unsure" || verdict.kind === "multiple";
+  useEffect(() => {
+    if (!unclear || struggling) return;
+    const timer = setTimeout(() => setStruggling(true), MANUAL_OFFER_MS);
+    return () => clearTimeout(timer);
+  }, [unclear, struggling]);
+
+  async function taken(item: MedicationItem, method: "camera" | "manual" = "camera") {
     setSaving(true);
     setSaveFailed(false);
-    const ok = await onTaken(item);
+    const ok = await onTaken(item, method);
     setSaving(false);
     if (ok) setJustSaved(item.drugCode);
     else setSaveFailed(true);
@@ -169,6 +181,8 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
   const showEvidence = !allDone && !justSaved && (verdict.kind === "match" || verdict.kind === "mismatch") && evidence?.drugCode === verdict.drugCode;
   const seenImprint = showEvidence ? pillImprint(verdict.drugCode) : null;
   const time = group[0]?.time;
+  const recognitionFailed = phase === "notReady" || phase === "error" || Boolean(cameraProblem) || struggling;
+  const offerManual = !allDone && !matched && (recognitionFailed || needsCameraConsent);
 
   return (
     <div className={styles.pillPanel}>
@@ -211,6 +225,22 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
           <button type="button" className={styles.pillTaken} onClick={() => void taken(matched)} disabled={saving}>{ja ? "飲みました" : "먹었어요"}</button>
         ) : null}
       </div>
+      {offerManual ? (
+        manualOpen ? (
+          <div className={styles.pillManual}>
+            <small>{ja ? "カメラで確認できないときは、飲んだお薬を直接押してください。医療スタッフには「手動記録」と表示されます。" : "카메라로 확인이 안 되면 드신 약을 직접 눌러 주세요. 의료진에게는 \"직접 기록\"으로 보여요."}</small>
+            {remaining.map((item) => (
+              <button key={item.id} type="button" onClick={() => void taken(item, "manual")} disabled={saving}>
+                {ja ? `${label(item)}を飲みました` : `${withParticle(label(item), "을", "를")} 먹었어요`}
+              </button>
+            ))}
+          </div>
+        ) : (
+          <button type="button" className={styles.pillManualOpen} onClick={() => setManualOpen(true)}>
+            {ja ? "カメラを使わずに記録する" : "카메라 없이 직접 기록하기"}
+          </button>
+        )
+      ) : null}
       {debugShow && phase === "running" && !allDone ? (
         <div className={styles.pillDebug} aria-label="개발용 알약 시뮬레이션">
           <small>개발용 (모델 대신)</small>

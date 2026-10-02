@@ -5,6 +5,19 @@ import { clearMedicationIntakes, dateKey, type TodayMedication } from "../../lib
 
 const patientId = "tanaka-haruko";
 
+function recognition(status: string, medicationCode: string | null, extra: Record<string, unknown> = {}) {
+  return {
+    patientId,
+    medicationCode,
+    expectedMedicationCode: "K-045037",
+    confidence: 0.91,
+    status,
+    modelVersion: "pill-yolo11n-10cls-v1",
+    measuredAt: "2026-10-01T23:05:00.000Z",
+    ...extra,
+  };
+}
+
 function post(body: unknown) {
   return POST(new Request("http://localhost/api/medication", { method: "POST", body: JSON.stringify(body) }));
 }
@@ -32,6 +45,7 @@ describe("/api/medication", () => {
     const taken = body.items.find((item) => item.id === "tanaka-lyribea-am");
     expect(taken?.status).toBe("taken");
     expect(taken?.takenAt).toEqual(expect.any(String));
+    expect(taken?.method).toBe("camera"); // method를 안 보내면 카메라 확인
     expect(body.next?.id).toBe("tanaka-tylenol-am");
     expect(body.nextGroup.map((item) => item.id)).toEqual(["tanaka-tylenol-am"]); // 아침에 남은 약
   });
@@ -43,19 +57,36 @@ describe("/api/medication", () => {
     expect((await today()).body.items[0]?.takenAt).toBe(first);
   });
 
-  it("다른 약을 비춘 횟수와 마지막으로 보인 약을 기록한다", async () => {
-    await post({ patientId, medicationId: "tanaka-lyribea-am", event: "mismatch", detectedDrugCode: "K-004378" });
-    await post({ patientId, medicationId: "tanaka-lyribea-am", event: "mismatch", detectedDrugCode: "K-005849" });
+  it("인식이 안 될 때 직접 기록하면 method가 manual로 남는다", async () => {
+    expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "taken", method: "manual" })).status).toBe(200);
     const item = (await today()).body.items[0];
-    expect(item?.mismatchCount).toBe(2);
+    expect(item?.status).toBe("taken");
+    expect(item?.method).toBe("manual");
+  });
+
+  it("인식 결과(PillRecognitionResult)를 받아 다른 약을 비춘 횟수와 마지막 결과를 기록한다", async () => {
+    await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: recognition("mismatched", "K-004378") });
+    await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: recognition("unknown", null, { confidence: null }) });
+    await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: recognition("mismatched", "K-005849") });
+    const item = (await today()).body.items[0];
+    expect(item?.mismatchCount).toBe(2); // unknown은 세지 않음
     expect(item?.lastMismatch?.detectedDrugCode).toBe("K-005849");
-    expect(item?.status).toBe("pending");
+    expect(item?.lastRecognition?.status).toBe("mismatched");
+    expect(item?.status).toBe("pending"); // 인식 결과만으로는 복용 처리하지 않음
+  });
+
+  it("인식 결과에 정해진 필드 외의 값(예: 사진)이 있으면 거부한다", async () => {
+    const withImage = recognition("matched", "K-045037", { image: "data:image/jpeg;base64,AAAA" });
+    expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: withImage })).status).toBe(400);
+    const otherPatient = recognition("matched", "K-045037", { patientId: "kim-minsu" });
+    expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: otherPatient })).status).toBe(400);
   });
 
   it("잘못된 요청은 거부한다", async () => {
     expect((await post({ patientId, medicationId: "kim-zolpidem-night", event: "taken" })).status).toBe(400); // 다른 환자의 약
     expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "eaten" })).status).toBe(400);
-    expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "mismatch" })).status).toBe(400);
+    expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition" })).status).toBe(400);
+    expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "taken", method: "guess" })).status).toBe(400);
     expect((await post({ patientId: "someone", medicationId: "x", event: "taken" })).status).toBe(403);
     expect((await today("someone")).status).toBe(403);
     const badJson = await POST(new Request("http://localhost/api/medication", { method: "POST", body: "{" }));

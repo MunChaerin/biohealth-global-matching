@@ -58,6 +58,11 @@
 .pillActions:empty { display: none; }
 .pillTaken { flex: 1; padding: 14px; color: #fff; background: #2d8869; border: 0; border-radius: 12px; font-size: 16px; font-weight: 800; }
 .pillTaken:disabled { opacity: .6; }
+.pillManualOpen { align-self: flex-start; padding: 6px 2px; color: #4d6b64; background: none; border: 0; font-size: 14px; text-decoration: underline; }
+.pillManual { display: flex; flex-direction: column; gap: 6px; padding: 10px; background: #f6f8f7; border-radius: 10px; }
+.pillManual small { color: #4d6b64; line-height: 1.4; }
+.pillManual button { padding: 10px; color: #2d5d50; background: #fff; border: 1px solid #b8d4cc; border-radius: 10px; font-size: 15px; font-weight: 700; }
+.pillManual button:disabled { opacity: .6; }
 .pillDebug { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px; border: 1px dashed #c9ddd8; border-radius: 10px; }
 .pillDebug small { width: 100%; color: #8ca1a7; font-size: 10px; }
 .pillDebug button { padding: 5px 8px; color: #25474d; background: #f7fbfa; border: 1px solid #dceae6; border-radius: 7px; font-size: 11px; }

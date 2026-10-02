@@ -157,8 +157,8 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
           cameraProblem={cameraProblem}
           needsCameraConsent={!cameraEnabled}
           onAllowCamera={() => setPillCameraAllowed(true)}
-          onTaken={async (item) => {
-            const ok = await pill.confirmTaken(item);
+          onTaken={async (item, method) => {
+            const ok = await pill.confirmTaken(item, method);
             if (ok) {
               setTakenIds((ids) => [...ids, item.id]);
               pillCheck.onTaken(item);

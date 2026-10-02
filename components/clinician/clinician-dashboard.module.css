@@ -48,3 +48,5 @@
 .medTaken em { color: #23865e; background: #e3f4ec; }
 .medPending em { color: #7c8f94; background: #eef2f2; }
 .medicationList .medMismatch { color: #a3551d; }
+
+.medManual { display: inline-block; margin-left: 6px; padding: 1px 6px; color: #8a5a00; background: #fff4dc; border-radius: 6px; font-size: 11px; font-style: normal; font-weight: 700; }

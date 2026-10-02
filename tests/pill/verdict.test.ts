@@ -24,13 +24,13 @@ describe("PillVerdictTracker", () => {
     const tracker = new PillVerdictTracker("A");
     expect(tracker.update(0, [amlodipine()])).toEqual({ kind: "checking", drugCode: "A" });
     expect(tracker.update(STABLE_MS - 1, [amlodipine()]).kind).toBe("checking");
-    expect(tracker.update(STABLE_MS, [amlodipine()])).toEqual({ kind: "match", drugCode: "A" });
+    expect(tracker.update(STABLE_MS, [amlodipine()])).toMatchObject({ kind: "match", drugCode: "A", confidence: expect.any(Number) });
   });
 
   it("다른 약이 1초 이어지면 다른 약으로 판정한다", () => {
     const tracker = new PillVerdictTracker("A");
     tracker.update(0, [metformin()]);
-    expect(tracker.update(STABLE_MS, [metformin()])).toEqual({ kind: "mismatch", drugCode: "B" });
+    expect(tracker.update(STABLE_MS, [metformin()])).toMatchObject({ kind: "mismatch", drugCode: "B" });
   });
 
   it("중간에 약이 바뀌거나 사라지면 처음부터 다시 센다", () => {
@@ -54,9 +54,9 @@ describe("PillVerdictTracker", () => {
   it("같은 시간에 먹을 약이 여러 개면 그중 하나면 맞음, 남은 약이 바뀌면 다시 센다", () => {
     const tracker = new PillVerdictTracker(["A", "B"]);
     tracker.update(0, [metformin()]);
-    expect(tracker.update(STABLE_MS, [metformin()])).toEqual({ kind: "match", drugCode: "B" });
+    expect(tracker.update(STABLE_MS, [metformin()])).toMatchObject({ kind: "match", drugCode: "B" });
     tracker.setExpected(["A"]); // B를 먹음
     expect(tracker.update(STABLE_MS + 100, [metformin()]).kind).toBe("checking");
-    expect(tracker.update(2 * STABLE_MS + 100, [metformin()])).toEqual({ kind: "mismatch", drugCode: "B" });
+    expect(tracker.update(2 * STABLE_MS + 100, [metformin()])).toMatchObject({ kind: "mismatch", drugCode: "B" });
   });
 });
