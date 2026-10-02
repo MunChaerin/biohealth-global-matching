@@ -145,6 +145,8 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
           playsInline
           aria-label={pillMode ? (isJapanese ? "お薬確認カメラのプレビュー" : "약 확인 카메라 미리보기") : isJapanese ? "表情観察カメラのプレビュー" : "표정 관찰 카메라 미리보기"}
         />
+        {/* 알약은 이 네모 안만 본다 (lib/pill/zoom.ts GUIDE_FRACTION과 같은 크기) */}
+        {pillMode && showVideo ? <div className={styles.pillGuide} aria-hidden="true" /> : null}
       </div>
 
       {pillCheck ? (

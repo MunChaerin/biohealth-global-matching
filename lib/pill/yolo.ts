@@ -32,17 +32,24 @@ interface RawBox {
   classIndex: number;
 }
 
-function iou(a: RawBox, b: RawBox): number {
+export const CONTAIN_THRESHOLD = 0.7; // 작은 박스가 이 비율 이상 다른 박스 안에 들어가 있으면 같은 알약 (알약 전체와 반쪽 등)
+
+/** 같은 알약에 겹친 박스인지: 겹친 비율(IoU)이 높거나, 작은 박스가 대부분 다른 박스 안에 있음 */
+function sameObject(a: RawBox, b: RawBox, iouThreshold: number): boolean {
   const w = Math.max(0, Math.min(a.x2, b.x2) - Math.max(a.x1, b.x1));
   const h = Math.max(0, Math.min(a.y2, b.y2) - Math.max(a.y1, b.y1));
   const inter = w * h;
-  const union = (a.x2 - a.x1) * (a.y2 - a.y1) + (b.x2 - b.x1) * (b.y2 - b.y1) - inter;
-  return union > 0 ? inter / union : 0;
+  const areaA = (a.x2 - a.x1) * (a.y2 - a.y1);
+  const areaB = (b.x2 - b.x1) * (b.y2 - b.y1);
+  const union = areaA + areaB - inter;
+  const smaller = Math.min(areaA, areaB);
+  return (union > 0 && inter / union >= iouThreshold) || (smaller > 0 && inter / smaller >= CONTAIN_THRESHOLD);
 }
 
 /**
  * 모델 출력 -> 알약 검출 목록 (원본 이미지 기준 정규화 박스).
  * 같은 알약에 겹친 박스는 클래스와 상관없이 하나만 남긴다 (한 알에 여러 약 이름이 붙는 것 방지).
+ * 크기가 달라 IoU가 낮아도 작은 박스가 큰 박스 안에 대부분 들어가 있으면 같은 알약으로 본다.
  */
 export function decodeYoloOutput(
   data: ArrayLike<number>,
@@ -78,7 +85,7 @@ export function decodeYoloOutput(
   candidates.sort((a, b) => b.score - a.score);
   const kept: RawBox[] = [];
   for (const candidate of candidates) {
-    if (kept.every((other) => iou(candidate, other) < iouThreshold)) kept.push(candidate);
+    if (kept.every((other) => !sameObject(candidate, other, iouThreshold))) kept.push(candidate);
   }
 
   return kept.map((item) => {

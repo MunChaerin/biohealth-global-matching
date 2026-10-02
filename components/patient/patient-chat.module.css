@@ -43,6 +43,8 @@
 .cameraVideoLayer { display: contents; }
 .cameraPillMode { position: fixed; top: 50%; right: 24px; z-index: 50; flex-direction: column; align-items: stretch; gap: 12px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 16px; overflow-y: auto; background: #fff; border: 1px solid #c9ddd8; border-radius: 20px; box-shadow: 0 24px 60px rgba(17,79,75,.22); transform: translateY(-50%); }
 .pillVideoBox { position: relative; flex: none; aspect-ratio: 4 / 3; overflow: hidden; background: #e8f0ee; border-radius: 14px; }
+/* 알약을 보는 가운데 네모: 짧은 변(높이)의 60% 정사각형 (GUIDE_FRACTION). 바깥은 어둡게 */
+.pillGuide { position: absolute; top: 50%; left: 50%; height: 60%; aspect-ratio: 1; transform: translate(-50%, -50%); border: 3px dashed rgba(255,255,255,.95); border-radius: 14px; box-shadow: 0 0 0 9999px rgba(0,0,0,.3); pointer-events: none; }
 .pillPanel { display: flex; flex-direction: column; gap: 10px; color: #25474d; font-size: 13px; }
 .pillHeading { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; }
 .pillHeading div { display: flex; flex-direction: column; gap: 3px; }

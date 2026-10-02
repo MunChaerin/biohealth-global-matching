@@ -44,6 +44,15 @@ describe("decodeYoloOutput", () => {
     expect(pills.map((pill) => pill.drugCode)).toEqual(["A", "C"]);
   });
 
+  it("크기가 달라 IoU가 낮아도 큰 박스 안에 대부분 들어간 박스는 같은 알약으로 본다 (알약 전체와 반쪽)", () => {
+    const { data, dims } = fakeOutput([
+      [320, 320, 120, 60, 0.1, 0.8, 0.1], // 알약 전체 B
+      [290, 320, 60, 60, 0.1, 0.1, 0.6], // 그 왼쪽 반 C (IoU 0.5, 큰 박스 안에 100%)
+      [300, 300, 30, 30, 0.7, 0.1, 0.1], // 안쪽 작은 A (IoU 0.125)
+    ]);
+    expect(decodeYoloOutput(data, dims, classes, box).map((pill) => pill.drugCode)).toEqual(["B"]);
+  });
+
   it("모델 클래스 수와 메타데이터 클래스 수가 다르면 오류", () => {
     const { data, dims } = fakeOutput([[320, 320, 60, 60, 0.8, 0.1]]);
     expect(() => decodeYoloOutput(data, dims, classes, box)).toThrow(/클래스 수/);

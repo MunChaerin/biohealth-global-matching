@@ -116,12 +116,12 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
   } else {
     switch (verdict.kind) {
       case "noPill": {
-        status = ja ? `お薬を1錠だけ、カメラに近づけて見せてください。` : `약을 한 알만 카메라 가까이 비춰 주세요.`;
+        status = ja ? `お薬を1錠だけ、画面の真ん中の四角の中に近づけて見せてください。` : `약을 한 알만 화면 가운데 네모 안에 가까이 비춰 주세요.`;
         const list = remaining.map((item) => `${label(item)} ${dose(item)}`).join(ja ? "、" : ", ");
         speechKey = "start";
         speechText = ja
-          ? `今は${list}を飲む時間です。1錠ずつ、カメラに近づけて見せてください。`
-          : `지금은 ${list} 드실 시간이에요. 한 알씩 카메라 가까이 비춰 주세요.`;
+          ? `今は${list}を飲む時間です。1錠ずつ、画面の真ん中の四角の中に見せてください。`
+          : `지금은 ${list} 드실 시간이에요. 한 알씩 화면 가운데 네모 안에 비춰 주세요.`;
         break;
       }
       case "multiple":

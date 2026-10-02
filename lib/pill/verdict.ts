@@ -10,6 +10,7 @@ export interface PillDetection {
 export const DETECT_MIN_CONFIDENCE = 0.4; // 이보다 낮은 검출은 알약으로 보지 않음
 export const CONFIDENT = 0.6; // 이보다 낮으면 어떤 약인지 "잘 모르겠어요" (학습한 10종 밖의 약 오인 방지)
 export const STABLE_MS = 1_000; // 같은 약이 이만큼 이어져야 판정
+export const RELATIVE_MIN = 0.75; // 가장 확신 높은 박스의 이 비율보다 약한 박스는 다른 알약으로 세지 않음 (배경 착각 등)
 
 export type PillReading =
   | { kind: "noPill" }
@@ -25,9 +26,16 @@ export type PillVerdict =
   | { kind: "match"; drugCode: string; confidence?: number; box?: PillDetection["box"] } // box: 화면에서 알약을 확대해 보여줄 때 사용
   | { kind: "mismatch"; drugCode: string; confidence?: number; box?: PillDetection["box"] };
 
+/** 알약으로 셀 검출만 남긴다 (확신 높은 순). 0.83 옆의 0.48처럼 많이 약한 박스는 버린다. */
+export function pillsInFrame(detections: readonly PillDetection[]): PillDetection[] {
+  const found = detections.filter((item) => item.confidence >= DETECT_MIN_CONFIDENCE).sort((a, b) => b.confidence - a.confidence);
+  const top = found[0]?.confidence ?? 0;
+  return found.filter((item) => item.confidence >= top * RELATIVE_MIN);
+}
+
 /** 한 프레임의 검출 결과를 읽는다. */
 export function readDetections(detections: readonly PillDetection[]): PillReading {
-  const found = detections.filter((item) => item.confidence >= DETECT_MIN_CONFIDENCE);
+  const found = pillsInFrame(detections);
   if (found.length === 0) return { kind: "noPill" };
   if (found.length > 1) return { kind: "multiple" };
   const [pill] = found;

@@ -14,6 +14,12 @@ describe("readDetections", () => {
     expect(readDetections([amlodipine(), metformin()])).toEqual({ kind: "multiple" });
   });
 
+  it("가장 확신 높은 박스보다 많이 약한 박스(배경 착각 등)는 다른 알약으로 세지 않는다", () => {
+    // 로그: 리리베아 0.83, 듀오락스 0.62, 퍼킨정 0.48 -> 리리베아 한 알
+    expect(readDetections([amlodipine(0.83), metformin(0.62), metformin(0.48)])).toMatchObject({ kind: "pill", drugCode: "A" });
+    expect(readDetections([amlodipine(0.83), metformin(0.7)])).toEqual({ kind: "multiple" });
+  });
+
   it("확신이 낮으면 잘 모르겠어요 (학습하지 않은 약 오인 방지)", () => {
     expect(readDetections([amlodipine(0.5)])).toEqual({ kind: "unsure" });
   });
