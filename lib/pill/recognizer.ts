@@ -1,9 +1,11 @@
 import type { PillDetection } from "./verdict";
+import type { Region } from "./zoom";
 
 /** 카메라 프레임에서 알약을 찾아 어떤 약인지 알려주는 모델. 브라우저 안에서만 돈다(영상은 서버로 보내지 않음). */
 export interface PillRecognizer {
   modelVersion: string;
-  detect(frame: HTMLVideoElement | HTMLCanvasElement): Promise<PillDetection[]>;
+  /** region을 주면 프레임의 그 부분만 잘라 확대해서 본다. 돌려주는 박스는 항상 프레임 전체 기준. */
+  detect(frame: HTMLVideoElement | HTMLCanvasElement, region?: Region): Promise<PillDetection[]>;
   close(): void;
 }
 

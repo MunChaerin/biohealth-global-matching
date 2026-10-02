@@ -4,9 +4,12 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import type { MedicationItem } from "../../lib/medication/schedule";
 import { DebugPillRecognizer, loadPillRecognizer, type PillRecognizer } from "../../lib/pill/recognizer";
 import type { PillRecognitionResult } from "../../lib/pill/result";
+import { describeDetections, detectWithZoom } from "../../lib/pill/zoom";
+import { pillName } from "../../lib/pill/catalog";
 import { PillVerdictTracker, STABLE_MS, type PillDetection, type PillVerdict } from "../../lib/pill/verdict";
 
 const DETECT_INTERVAL_MS = 250;
+const LOG_INTERVAL_MS = 1_000; // 개발 중 콘솔에 인식 결과를 찍는 간격
 const EVIDENCE_SIZE = 200; // 확인 화면에 보여줄 알약 확대 사진 크기 (px)
 
 /** 판정에 쓴 화면에서 알약 부분만 잘라 확대 사진(data URL)을 만든다. 화면에만 쓰고 저장·전송하지 않는다. */
@@ -87,6 +90,7 @@ export function usePillCheck(options: {
     let reported: string | null = null; // 이번에 보낸 결과 (상태:약 코드) - 같은 결과는 다시 안 보냄
     let unsureSince: number | null = null;
     let evidenceCode: string | null = null;
+    let loggedAt = 0;
     const tracker = new PillVerdictTracker(medicationsRef.current.map((item) => item.drugCode));
     trackerRef.current = tracker;
     heldMatchRef.current = null;
@@ -101,7 +105,12 @@ export function usePillCheck(options: {
         let detections: PillDetection[] = [];
         const frame = correctedFrame.current?.(video) ?? video;
         try {
-          detections = await recognizer.detect(frame);
+          const result = await detectWithZoom(recognizer, frame);
+          detections = result.detections;
+          if (process.env.NODE_ENV !== "production" && !debug && performance.now() - loggedAt > LOG_INTERVAL_MS) {
+            loggedAt = performance.now();
+            console.debug(`[알약 인식] ${describeDetections(result, (code) => pillName(code, "ko"))}`);
+          }
         } catch (error) {
           console.error("pill detection error", error);
         }

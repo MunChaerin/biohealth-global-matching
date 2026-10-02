@@ -1,5 +1,6 @@
 import type { PillModelMetadata, PillRecognizer } from "./recognizer";
 import { decodeYoloOutput, letterbox } from "./yolo";
+import { toFrameBox } from "./zoom";
 
 // onnxruntime-web 실행 파일(wasm). package.json의 onnxruntime-web 버전과 맞춰야 한다.
 const ORT_WASM_URL =
@@ -38,17 +39,22 @@ export async function createOnnxPillRecognizer(metadata: PillModelMetadata, mode
 
   return {
     modelVersion: metadata.modelVersion,
-    async detect(frame) {
-      const width = frame instanceof HTMLVideoElement ? frame.videoWidth : frame.width;
-      const height = frame instanceof HTMLVideoElement ? frame.videoHeight : frame.height;
-      if (!width || !height) return [];
+    async detect(frame, region) {
+      const frameWidth = frame instanceof HTMLVideoElement ? frame.videoWidth : frame.width;
+      const frameHeight = frame instanceof HTMLVideoElement ? frame.videoHeight : frame.height;
+      if (!frameWidth || !frameHeight) return [];
+      // 확대할 부분 (없으면 화면 전체)
+      const sx = region ? region[0] * frameWidth : 0;
+      const sy = region ? region[1] * frameHeight : 0;
+      const width = region ? region[2] * frameWidth : frameWidth;
+      const height = region ? region[3] * frameHeight : frameHeight;
       const started = performance.now();
 
       // 비율을 유지한 채 정사각형으로 (YOLO 학습 때와 같은 회색 여백)
       const box = letterbox(width, height, size);
       context.fillStyle = "rgb(114,114,114)";
       context.fillRect(0, 0, size, size);
-      context.drawImage(frame, box.padX, box.padY, width * box.scale, height * box.scale);
+      context.drawImage(frame, sx, sy, width, height, box.padX, box.padY, width * box.scale, height * box.scale);
       const pixels = context.getImageData(0, 0, size, size).data;
       const area = size * size;
       // 매 프레임 새로 만든다: Worker 방식은 run() 때 입력 버퍼를 Worker로 넘겨서(transfer) 원래 배열이 비워진다
@@ -65,7 +71,8 @@ export async function createOnnxPillRecognizer(metadata: PillModelMetadata, mode
         firstInference = false;
         console.info(`[알약 인식] 첫 추론 ${Math.round(performance.now() - started)}ms (${worker ? "Worker" : "메인 스레드"})`);
       }
-      return decodeYoloOutput(output.data as Float32Array, output.dims, metadata.classOrder, box, 0.25, 0.5);
+      const detections = decodeYoloOutput(output.data as Float32Array, output.dims, metadata.classOrder, box, 0.25, 0.5);
+      return region ? detections.map((item) => (item.box ? { ...item, box: toFrameBox(item.box, region) } : item)) : detections;
     },
     close() {
       void session.release();
