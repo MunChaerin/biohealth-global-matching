@@ -50,6 +50,8 @@ async function postMedicationEvent(body: Record<string, unknown>): Promise<boole
  * 아직 안 먹은 약 중 하나)과 비교한 판정을 돌려준다. 한 알씩 비추고, 한 알을 먹으면 남은 약으로 계속 확인한다.
  * 판정이 확정되면(matched / mismatched / 1초 넘게 unknown) 그 약이 사라졌다 다시 나오기 전까지
  * 한 번만 인식 결과(PillRecognitionResult, 사진 없음)를 서버에 보낸다. 방금 먹은 약을 다시 비춘 경우는 보내지 않는다.
+ * 맞는 약으로 한 번 판정되면 [먹었어요]를 누르거나 다른 약으로 판정되기 전까지 그 판정을 유지한다
+ * (손에 든 알약이 잠깐 안 잡혀도 [먹었어요] 버튼이 사라지지 않게).
  * debug면 모델 대신 버튼으로 보이는 약을 정한다 (?pillDebug=1, 모델 학습 전 화면 흐름 확인용).
  */
 export function usePillCheck(options: {
@@ -68,6 +70,7 @@ export function usePillCheck(options: {
   const takenRef = useRef(takenCodes);
   takenRef.current = takenCodes;
   const trackerRef = useRef<PillVerdictTracker | null>(null);
+  const heldMatchRef = useRef<Extract<PillVerdict, { kind: "match" }> | null>(null); // 유지 중인 맞는 약 판정
   const expectedKey = medications.map((item) => item.drugCode).join(",");
   const hasMedications = medications.length > 0;
   const [phase, setPhase] = useState<PillCheckPhase>("loading");
@@ -86,6 +89,7 @@ export function usePillCheck(options: {
     let evidenceCode: string | null = null;
     const tracker = new PillVerdictTracker(medicationsRef.current.map((item) => item.drugCode));
     trackerRef.current = tracker;
+    heldMatchRef.current = null;
     setPhase("loading");
     setVerdict({ kind: "noPill" });
     setEvidence(null);
@@ -102,7 +106,10 @@ export function usePillCheck(options: {
           console.error("pill detection error", error);
         }
         if (cancelled) return;
-        const next = tracker.update(performance.now(), detections);
+        const reading = tracker.update(performance.now(), detections);
+        if (reading.kind === "match") heldMatchRef.current = reading;
+        else if (reading.kind === "mismatch") heldMatchRef.current = null;
+        const next = heldMatchRef.current ?? reading;
         setVerdict(next);
         if ((next.kind === "match" || next.kind === "mismatch") && next.box && evidenceCode !== next.drugCode) {
           evidenceCode = next.drugCode;
@@ -185,6 +192,7 @@ export function usePillCheck(options: {
   // 한 알을 먹어서 남은 약이 바뀌면 판정 기준만 바꾼다 (보고 있던 약은 처음부터 다시 판정)
   useEffect(() => {
     trackerRef.current?.setExpected(expectedKey ? expectedKey.split(",") : []);
+    heldMatchRef.current = null;
     setEvidence(null);
   }, [expectedKey]);
 

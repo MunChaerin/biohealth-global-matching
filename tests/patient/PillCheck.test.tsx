@@ -110,6 +110,25 @@ describe("알약 확인 모드", () => {
     expect(matched[0].result).toMatchObject({ patientId: "tanaka-haruko", expectedMedicationCode: tylenol.drugCode, confidence: 0.92, modelVersion: "debug" });
   });
 
+  it("맞는 약으로 한 번 판정되면 약이 안 보이거나 애매해져도 [먹었어요]를 유지하고, 다른 약이면 없앤다", async () => {
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    mockCamera();
+    renderPillCheck();
+    await screen.findByRole("button", { name: "타이레놀정 500mg" });
+
+    await showPill("타이레놀정 500mg");
+    expect(await screen.findByRole("button", { name: "먹었어요" })).toBeInTheDocument();
+    await showPill("없음");
+    await showPill("애매함");
+    await showPill("여러 알");
+    expect(screen.getByText(/맞아요! 타이레놀정 500mg이에요/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "먹었어요" })).toBeInTheDocument();
+
+    await showPill("다른 약");
+    expect(await screen.findByText(/이 약은 무스판정이에요/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
+  });
+
   it("다른 약이면 안내하고, 같은 약을 계속 비춰도 의료진 기록은 한 번만 남긴다", async () => {
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();
