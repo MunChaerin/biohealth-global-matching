@@ -50,6 +50,9 @@ export function readDetections(detections: readonly PillDetection[]): PillReadin
 export class PillVerdictTracker {
   private candidate: { drugCode: string; since: number } | null = null;
   private expected: Set<string>;
+  // 약별 "맞는 약" 기준 (model-metadata.json thresholds.classConfidence). 글자 없는 면이 다른 약과 똑같아
+  // 그 약을 이 약으로 높게 확신하는 경우가 있는 약만 더 높게 둔다 (예: 리리베아 0.8 - 독립목클린 뒷면을 0.7대로 리리베아라고 봄).
+  private classConfidence: Readonly<Record<string, number>> = {};
 
   /** expected: 지금 먹어야 하는 약 코드 (같은 시간에 여러 알이면 여러 개 - 그중 하나면 맞음) */
   constructor(expected: string | readonly string[]) {
@@ -62,6 +65,10 @@ export class PillVerdictTracker {
     this.candidate = null;
   }
 
+  setClassConfidence(classConfidence: Readonly<Record<string, number>>): void {
+    this.classConfidence = classConfidence;
+  }
+
   update(timeMs: number, detections: readonly PillDetection[]): PillVerdict {
     const reading = readDetections(detections);
     if (reading.kind !== "pill") {
@@ -69,7 +76,8 @@ export class PillVerdictTracker {
       return reading;
     }
     const expected = this.expected.has(reading.drugCode);
-    if (!expected && reading.confidence < MISMATCH_CONFIDENT) {
+    const needed = expected ? (this.classConfidence[reading.drugCode] ?? CONFIDENT) : MISMATCH_CONFIDENT;
+    if (reading.confidence < needed) {
       this.candidate = null;
       return { kind: "unsure" };
     }

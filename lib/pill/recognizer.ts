@@ -4,6 +4,7 @@ import type { Region } from "./zoom";
 /** 카메라 프레임에서 알약을 찾아 어떤 약인지 알려주는 모델. 브라우저 안에서만 돈다(영상은 서버로 보내지 않음). */
 export interface PillRecognizer {
   modelVersion: string;
+  classConfidence?: Readonly<Record<string, number>>; // 약별 "맞는 약" 기준 (없으면 CONFIDENT)
   /** region을 주면 프레임의 그 부분만 잘라 확대해서 본다. 돌려주는 박스는 항상 프레임 전체 기준. */
   detect(frame: HTMLVideoElement | HTMLCanvasElement, region?: Region): Promise<PillDetection[]>;
   close(): void;
@@ -20,7 +21,7 @@ export interface PillModelMetadata {
   input: { shape: [number, number, number, number]; colorOrder: "RGB"; normalization: string; resize: string };
   output: { shape: [number, number, number] };
   classOrder: string[]; // 클래스 번호 순서대로 약 코드
-  thresholds: { detect: number; confidence: number; stableMs: number };
+  thresholds: { detect: number; confidence: number; stableMs: number; classConfidence?: Record<string, number> };
 }
 
 export type PillRecognizerLoad =

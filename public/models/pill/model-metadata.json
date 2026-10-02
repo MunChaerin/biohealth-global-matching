@@ -1,5 +1,5 @@
 {
-  "modelVersion": "pill-yolo11n-10cls-v1",
+  "modelVersion": "pill-yolo11n-10cls-v2",
   "task": "detection",
   "architecture": "YOLO11n (Ultralytics), 알약 위치 + 10종 분류",
   "file": "pill_classifier.onnx",
@@ -25,7 +25,7 @@
       14,
       8400
     ],
-    "format": "후보 8400개 x (cx, cy, w, h [입력 픽셀 기준] + 클래스별 점수 0~1). NMS는 웹에서 (클래스 구분 없이, IoU 0.5)"
+    "format": "후보 8400개 x (cx, cy, w, h [입력 픽셀 기준] + 클래스별 점수 0~1). NMS는 웹에서 (클래스 구분 없이, IoU 0.5 또는 작은 박스가 70% 이상 포함)"
   },
   "classOrder": [
     "K-045037",
@@ -42,15 +42,26 @@
   "thresholds": {
     "detect": 0.4,
     "confidence": 0.6,
-    "stableMs": 1000
+    "stableMs": 1000,
+    "mismatchConfidence": 0.8,
+    "mismatchStableMs": 2000,
+    "classConfidence": {
+      "K-045037": 0.8
+    }
   },
-  "trainedAt": "2026-10-02",
-  "exportedAt": "2026-10-02",
-  "dataset": "AI Hub 경구약제 이미지 데이터(576) 중 10종 (TS_3, VS_10) + 배경 합성. 돌린 각도 기준 학습/검증/시험 분리",
+  "trainedAt": "2026-10-03",
+  "exportedAt": "2026-10-03",
+  "dataset": "AI Hub 경구약제 이미지 데이터(576) 중 10종 (TS_3, VS_10) + 배경 합성. 돌린 각도 기준 학습/검증/시험 분리. v2: COCO val2017 일상 사진을 잘라 '알약 없음'(빈 라벨)으로 학습 2,000 / 검증 200장 추가, 배경 시험 500장",
   "testMetrics": {
-    "mAP50": 0.9826,
-    "mAP50_95": 0.8834,
-    "overall_correct": 0.9695,
-    "overall_wrong_pill": 0.0
+    "mAP50": 0.995,
+    "mAP50_95": 0.9151,
+    "overall_correct": 0.9839,
+    "overall_wrong_pill": 0.0,
+    "background": {
+      "images": 500,
+      "anyBox": 0.012,
+      "pillLevel": 0.006,
+      "mismatchLevel": 0.0
+    }
   }
 }

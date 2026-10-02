@@ -40,6 +40,14 @@ describe("PillVerdictTracker", () => {
     expect(tracker.update(MISMATCH_STABLE_MS, [metformin()])).toMatchObject({ kind: "mismatch", drugCode: "B" });
   });
 
+  it("약별 기준이 있으면 그 약은 더 높은 확신에서만 맞음 (글자 없는 면이 다른 약과 같은 캡슐)", () => {
+    const tracker = new PillVerdictTracker("A");
+    tracker.setClassConfidence({ A: 0.8 });
+    expect(tracker.update(0, [amlodipine(0.75)]).kind).toBe("unsure");
+    tracker.update(100, [amlodipine(0.85)]);
+    expect(tracker.update(100 + STABLE_MS, [amlodipine(0.85)]).kind).toBe("match");
+  });
+
   it("다른 약이 0.8보다 약하면 다른 약이라고 하지 않고 잘 모르겠어요 (배경 착각 방지)", () => {
     const tracker = new PillVerdictTracker("A");
     for (let t = 0; t <= 5_000; t += 250) expect(tracker.update(t, [metformin(0.75)]).kind).toBe("unsure");

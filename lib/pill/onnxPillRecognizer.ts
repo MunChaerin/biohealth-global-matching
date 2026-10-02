@@ -39,6 +39,7 @@ export async function createOnnxPillRecognizer(metadata: PillModelMetadata, mode
 
   return {
     modelVersion: metadata.modelVersion,
+    classConfidence: metadata.thresholds.classConfidence ?? {},
     async detect(frame, region) {
       const frameWidth = frame instanceof HTMLVideoElement ? frame.videoWidth : frame.width;
       const frameHeight = frame instanceof HTMLVideoElement ? frame.videoHeight : frame.height;

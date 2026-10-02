@@ -5,9 +5,9 @@
 ## 전체 흐름
 
 ```
-AI Hub 경구약제 이미지 (10종만) + 직접 찍은 웹캠 사진
-        ↓ 학습 (YOLO, 이 PC의 RTX 5060 Ti)
-  ONNX 변환 → public/models/pill/ (manifest.json + onnx)
+AI Hub 경구약제 이미지 (10종만) + 배경 합성 + COCO 일상 사진(알약 없음)
+        ↓ 학습 (YOLO11n, 이 PC의 RTX 5060 Ti)
+  ONNX 변환 → public/models/pill/ (pill_classifier.onnx + classes.json + model-metadata.json)
         ↓
 웹 환자 화면: [복용했어요] → 카메라 카드가 커지며 알약 확인
   맞는 약 → [먹었어요] → /api/medication 기록 → 의료진 화면 "오늘 복약 현황"
@@ -27,10 +27,11 @@ AI Hub 경구약제 이미지 (10종만) + 직접 찍은 웹캠 사진
 - [x] 웹: ONNX 모델 실행부 + YOLO 출력 후처리 (모델 파일만 넣으면 동작)
 - [x] 웹캠 촬영 도구 (`capture_pills.py`)
 - [x] 학습할 10종 확정 (`classes.json`), 시연 환자 복약 일정을 시연 약 2종으로 변경
-- [ ] AI Hub 데이터 신청·승인 → 10종이 든 파일만 내려받기
-- [ ] 데이터 변환 스크립트 (AI Hub JSON → YOLO 형식, train/val/test 분리)
-- [ ] 학습 + 시연 환경(직접 찍은 사진) 기준 정확도 확인
-- [ ] ONNX 변환 → `public/models/pill/`
+- [x] AI Hub 데이터 신청·승인 → 10종이 든 파일만 내려받기
+- [x] 데이터 변환 스크립트 (`build_dataset.py`, AI Hub JSON → YOLO 형식, 돌린 각도 기준 train/val/test 분리)
+- [x] 학습 v1 + ONNX 변환 → `public/models/pill/`
+- [x] 웹캠 테스트에서 배경 오인식 발견 → 가운데 네모·겹친 박스 합치기·판정 기준 조정 + 배경 사진 넣어 v2 재학습
+- [ ] 시연 환경(노트북 웹캠)에서 v2 확인
 
 ## 모델 없이 화면 확인하기
 
@@ -54,9 +55,9 @@ python capture_pills.py --drug pending:amlodipine
 |---|---|
 | `pill_classifier.onnx` | 모델 (YOLO11n, 10.6MB) |
 | `classes.json` | 클래스 번호 순서대로 약 코드·이름 |
-| `model-metadata.json` | 모델 버전, 입력(1x3x640x640, RGB, /255, 회색 114 레터박스), 출력(1x14x8400), 클래스 순서, 기준값(검출 0.4 / 확신 0.6 / 1초), 날짜, 시험 성적 |
+| `model-metadata.json` | 모델 버전, 입력(1x3x640x640, RGB, /255, 회색 114 레터박스), 출력(1x14x8400), 클래스 순서, 기준값(검출 0.4 / 맞는 약 0.6·1초, 리리베아만 0.8 / 다른 약 0.8·2초), 날짜, 시험 성적 |
 
-`train_pill.py --export-only runs/pill/weights/best.pt`로 다시 만들 수 있다.
+`train_pill.py --export-only runs/pill_v2/weights/best.pt`로 다시 만들 수 있다.
 웹은 `NEXT_PUBLIC_PILL_MODEL_URL`(기본 `/models/pill/pill_classifier.onnx`)로 모델 위치를 바꿀 수 있고,
 메타데이터는 모델과 같은 폴더의 `model-metadata.json`을 읽는다 (`NEXT_PUBLIC_PILL_MODEL_METADATA_URL`로 변경 가능).
 
@@ -90,3 +91,27 @@ python capture_pills.py --drug pending:amlodipine
 
 약 7%일 때 타이레놀은 24장 중 6장이 무스판정으로 틀렸는데, 확대하면 24장 모두 맞았다.
 개발 서버에서는 콘솔(Verbose 수준)에 1초마다 `[알약 인식] 네모 무스판정 0.70 -> 확대 타이레놀정 0.88` 식으로 찍힌다.
+
+## v2: 알약 없는 배경 사진으로 재학습 (`add_backgrounds.py`)
+
+v1은 AI Hub 알약 사진만 봐서 "이건 알약이 아니다"를 배운 적이 없었다. 그래서 웹캠에 함께 찍힌 잠옷 무늬·옷·얼굴을 알약으로 착각했다.
+COCO val2017 일상 사진(사람·옷·실내)을 정사각형으로 잘라 "알약 없음"(빈 라벨)으로 학습 2,000 / 검증 200장을 넣었다.
+따로 떼어 둔 500장으로 배경 오인식을 잰다. v1 가중치에서 이어서 20 epoch 학습했다 (약 2시간, 12 epoch이 가장 좋았음).
+
+| 시험 (`test_report.json`) | v1 | v2 |
+|---|---|---|
+| mAP50 / mAP50-95 | 0.983 / 0.883 | 0.995 / 0.915 |
+| 웹 기준 판정 정확도 (1,116장) | 96.95% | 98.39% |
+| 다른 약으로 틀림 | 0% | 0% |
+| 리리베아 맞음 | 55.6% | 83.3% |
+| 배경 500장 중 알약 박스가 나옴 | **75.6%** | **1.2%** |
+| 배경이 맞는 약 기준(0.6)을 넘음 | 54.8% | 0.6% |
+| 배경이 다른 약 기준(0.8)을 넘음 | 9.2% | 0% |
+
+알약이 화면 폭의 약 7%로 작게 보이는 상황을 흉내 내면, 가운데 네모 + 확대 재판정으로 1,116장 중 1,101장이 맞았다 (v2).
+
+알려진 오인식: 리리베아와 독립목클린은 둘 다 글자 없는 흰 캡슐이라 뒷면끼리는 구분이 안 된다.
+v2는 독립목클린 뒷면을 리리베아로 0.70~0.78 확신해서, 리리베아만 맞는 약 기준을 0.8로 올렸다
+(`model-metadata.json` thresholds.classConfidence). 리리베아 진짜 사진은 앞면 0.89~0.92, 뒷면 대부분 0.8 이상이다.
+기준을 넘지 못하면 "잘 모르겠어요" + 각인이 보이게 돌려 달라는 안내가 나온다.
+작은 알약 시뮬레이션에서는 독립목클린 36장 중 1장이 여전히 다른 약으로 판정됐다.

@@ -5,11 +5,13 @@ r"""
 환경: conda env "pill-train" (PyTorch CUDA 12.8 + ultralytics, RTX 5060 Ti)
 사용법:
     conda activate pill-train
-    python train_pill.py --data C:\Users\DM501TGA\aihub_pill\yolo_dataset\data.yaml
-    python train_pill.py --data ... --export-only runs/pill/weights/best.pt   # 내보내기만
+    python add_backgrounds.py --coco ...\val2017 --dataset ...\yolo_dataset          # 배경(알약 없음) 사진 넣기
+    python train_pill.py --data C:\Users\DM501TGA\aihub_pill\yolo_dataset\data.yaml --from runs/pill/weights/best.pt --epochs 20
+    python train_pill.py --data ... --eval-only runs/pill/weights/best.pt            # 시험만 (v1과 비교할 때)
+    python train_pill.py --data ... --export-only runs/pill_v2/weights/best.pt       # 내보내기만
 
 결과:
-    runs/pill/                  학습 기록, 혼동행렬, best.pt
+    runs/pill_v2/               학습 기록, 혼동행렬, best.pt (v1은 runs/pill/)
     ../../public/models/pill/   웹에서 쓰는 pill_classifier.onnx + classes.json + model-metadata.json
 """
 
@@ -26,10 +28,18 @@ CLASSES_JSON = HERE / "classes.json"
 WEB_MODEL_DIR = HERE.parent.parent / "public" / "models" / "pill"
 IMG_SIZE = 640
 CONFIDENT = 0.6  # 웹(lib/pill/verdict.ts)의 CONFIDENT와 같은 값
+MISMATCH_CONFIDENT = 0.8  # 웹의 MISMATCH_CONFIDENT (다른 약 판정 기준)
+DETECT_MIN = 0.4  # 웹의 DETECT_MIN_CONFIDENCE
+# 약별 "맞는 약" 기준. 리리베아는 글자 없는 뒷면이 독립목클린 뒷면과 똑같아서, v2가 독립목클린 뒷면을
+# 리리베아로 0.70~0.78 확신했다 (리리베아 진짜 사진은 앞면 0.89~0.92, 뒷면 대부분 0.8 이상).
+CLASS_CONFIDENCE = {"K-045037": 0.8}
+RUN_NAME = "pill_v2"
 
 
-def train(data: Path, epochs: int) -> Path:
-    model = YOLO("yolo11n.pt")  # COCO로 미리 학습된 가장 작은 모델에서 시작
+def train(data: Path, epochs: int, start: str) -> Path:
+    # v1: COCO로 미리 학습된 가장 작은 모델(yolo11n.pt)에서 시작
+    # v2: v1 가중치에서 이어서, 배경(알약 없음) 사진을 섞어 추가 학습
+    model = YOLO(start)
     model.train(
         data=str(data),
         epochs=epochs,
@@ -37,9 +47,9 @@ def train(data: Path, epochs: int) -> Path:
         batch=32,
         workers=4,
         project=str(HERE / "runs"),
-        name="pill",
+        name=RUN_NAME,
         exist_ok=True,
-        patience=15,
+        patience=8,
         seed=2026,
         # 웹캠·손 위·방 조명에 대비한 증강 (AI Hub 사진은 스튜디오 촬영이라 차이를 메우는 용도)
         hsv_h=0.02,
@@ -53,15 +63,36 @@ def train(data: Path, epochs: int) -> Path:
         fliplr=0.5,
         mosaic=1.0,
         mixup=0.1,
-        close_mosaic=10,
+        close_mosaic=min(10, max(1, epochs // 4)),
     )
-    return HERE / "runs" / "pill" / "weights" / "best.pt"
+    return HERE / "runs" / RUN_NAME / "weights" / "best.pt"
 
 
-def evaluate(weights: Path, data: Path, classes: list[dict]) -> dict:
-    """시험용 사진(학습 때 안 본 각도)으로 평가: 검출 지표 + 웹과 같은 기준의 '판정' 정확도."""
+def background_false_alarms(model: YOLO, bg_dir: Path) -> dict | None:
+    """알약이 없는 배경 사진(bg_test, 학습에 안 씀)에서 알약을 잘못 찾는 비율. 웹 판정 기준과 같은 문턱으로 센다."""
+    images = sorted((bg_dir / "images").glob("*.jpg")) if bg_dir.exists() else []
+    if not images:
+        return None
+    box = pill = mismatch = 0
+    for image in images:
+        result = model.predict(str(image), imgsz=IMG_SIZE, conf=DETECT_MIN, verbose=False)[0]
+        top = max(result.boxes.conf.tolist(), default=0.0)
+        box += top >= DETECT_MIN
+        pill += top >= CONFIDENT
+        mismatch += top >= MISMATCH_CONFIDENT
+    n = len(images)
+    return {
+        "images": n,
+        "anyBox": round(box / n, 4),  # 알약 박스가 하나라도 나옴 (화면에 "잘 모르겠어요" 등)
+        "pillLevel": round(pill / n, 4),  # 맞는 약 판정 문턱(0.6)을 넘음
+        "mismatchLevel": round(mismatch / n, 4),  # 다른 약 판정 문턱(0.8)을 넘음
+    }
+
+
+def evaluate(weights: Path, data: Path, classes: list[dict], name: str = "pill_test") -> dict:
+    """시험용 사진(학습 때 안 본 각도)으로 평가: 검출 지표 + 웹과 같은 기준의 '판정' 정확도 + 배경 오인식."""
     model = YOLO(str(weights))
-    metrics = model.val(data=str(data), split="test", imgsz=IMG_SIZE, plots=True, project=str(HERE / "runs"), name="pill_test", exist_ok=True)
+    metrics = model.val(data=str(data), split="test", imgsz=IMG_SIZE, plots=True, project=str(HERE / "runs"), name=name, exist_ok=True)
 
     # 웹 판정 기준: 확신 CONFIDENT 이상인 알약이 정확히 하나이고 그 약이 정답이면 맞음
     test_dir = Path(data).parent / "test"
@@ -72,9 +103,9 @@ def evaluate(weights: Path, data: Path, classes: list[dict]) -> dict:
     for image in sorted((test_dir / "images").glob("*.jpg")):
         truth = int((test_dir / "labels" / f"{image.stem}.txt").read_text().split()[0])
         per_class[truth] += 1
-        result = model.predict(str(image), imgsz=IMG_SIZE, conf=0.4, verbose=False)[0]
+        result = model.predict(str(image), imgsz=IMG_SIZE, conf=DETECT_MIN, verbose=False)[0]
         found = [(int(c), float(p)) for c, p in zip(result.boxes.cls.tolist(), result.boxes.conf.tolist())]
-        if len(found) == 1 and found[0][1] >= CONFIDENT:
+        if len(found) == 1 and found[0][1] >= CLASS_CONFIDENCE.get(classes[found[0][0]]["code"], CONFIDENT):
             if found[0][0] == truth:
                 correct[truth] += 1
             else:
@@ -96,12 +127,13 @@ def evaluate(weights: Path, data: Path, classes: list[dict]) -> dict:
         "confusions": {f"{classes[t]['name']} -> {classes[p]['name']}": n for (t, p), n in wrong_as.most_common()},
         "overall_correct": round(sum(correct.values()) / max(1, sum(per_class.values())), 4),
         "overall_wrong_pill": round(sum(wrong_as.values()) / max(1, sum(per_class.values())), 4),
+        "background": background_false_alarms(model, Path(data).parent / "bg_test"),
     }
-    (HERE / "runs" / "pill_test_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
+    (HERE / "runs" / f"{name}_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     return report
 
 
-MODEL_VERSION = "pill-yolo11n-10cls-v1"
+MODEL_VERSION = "pill-yolo11n-10cls-v2"
 
 
 def export_for_web(weights: Path, classes: list[dict]) -> None:
@@ -124,7 +156,7 @@ def export_for_web(weights: Path, classes: list[dict]) -> None:
         [{"index": i, "code": c["code"], "name": c["name"]} for i, c in enumerate(classes)],
         ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-    report_path = HERE / "runs" / "pill_test_report.json"
+    report_path = HERE / "runs" / f"{RUN_NAME}_test_report.json"
     report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else {}
     metadata = {
         "modelVersion": MODEL_VERSION,
@@ -144,18 +176,22 @@ def export_for_web(weights: Path, classes: list[dict]) -> None:
         "output": {
             "name": "output0",
             "shape": [1, 4 + len(classes), 8400],
-            "format": "후보 8400개 x (cx, cy, w, h [입력 픽셀 기준] + 클래스별 점수 0~1). NMS는 웹에서 (클래스 구분 없이, IoU 0.5)",
+            "format": "후보 8400개 x (cx, cy, w, h [입력 픽셀 기준] + 클래스별 점수 0~1). NMS는 웹에서 (클래스 구분 없이, IoU 0.5 또는 작은 박스가 70% 이상 포함)",
         },
         "classOrder": [c["code"] for c in classes],
         "thresholds": {
             "detect": 0.4,  # 이보다 낮은 검출은 알약으로 보지 않음
             "confidence": CONFIDENT,  # 이보다 낮으면 unknown (학습하지 않은 약 억지 분류 방지)
             "stableMs": 1000,  # 같은 결과가 이만큼 이어져야 판정
+            "mismatchConfidence": MISMATCH_CONFIDENT,  # 다른 약은 더 엄격하게
+            "mismatchStableMs": 2000,
+            "classConfidence": CLASS_CONFIDENCE,  # 약별 맞는 약 기준 (없으면 confidence)
         },
         "trainedAt": date.fromtimestamp(Path(weights).stat().st_mtime).isoformat(),
         "exportedAt": date.today().isoformat(),
-        "dataset": "AI Hub 경구약제 이미지 데이터(576) 중 10종 (TS_3, VS_10) + 배경 합성. 돌린 각도 기준 학습/검증/시험 분리",
-        "testMetrics": {k: report.get(k) for k in ("mAP50", "mAP50_95", "overall_correct", "overall_wrong_pill")},
+        "dataset": "AI Hub 경구약제 이미지 데이터(576) 중 10종 (TS_3, VS_10) + 배경 합성. 돌린 각도 기준 학습/검증/시험 분리. "
+                   "v2: COCO val2017 일상 사진을 잘라 '알약 없음'(빈 라벨)으로 학습 2,000 / 검증 200장 추가, 배경 시험 500장",
+        "testMetrics": {k: report.get(k) for k in ("mAP50", "mAP50_95", "overall_correct", "overall_wrong_pill", "background")},
     }
     (WEB_MODEL_DIR / "model-metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"[웹 모델] {WEB_MODEL_DIR}")
@@ -165,13 +201,19 @@ def main():
     parser = argparse.ArgumentParser(description="알약 인식 모델 학습")
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--epochs", type=int, default=60)
+    parser.add_argument("--from", dest="start", default="yolo11n.pt", help="시작 가중치 (v2는 runs/pill/weights/best.pt)")
     parser.add_argument("--export-only", type=Path, default=None)
+    parser.add_argument("--eval-only", type=Path, default=None, help="시험만 (예: v1과 비교)")
     args = parser.parse_args()
     classes = json.loads(CLASSES_JSON.read_text(encoding="utf-8"))["classes"]
 
-    weights = args.export_only or train(args.data, args.epochs)
+    if args.eval_only:
+        report = evaluate(args.eval_only, args.data, classes, name=f"{args.eval_only.parent.parent.name}_test")
+        print(json.dumps(report, ensure_ascii=False, indent=1))
+        return
+    weights = args.export_only or train(args.data, args.epochs, args.start)
     if not args.export_only:
-        report = evaluate(weights, args.data, classes)
+        report = evaluate(weights, args.data, classes, name=f"{RUN_NAME}_test")
         print(json.dumps(report, ensure_ascii=False, indent=1))
     export_for_web(weights, classes)
 

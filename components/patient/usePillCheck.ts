@@ -183,6 +183,7 @@ export function usePillCheck(options: {
           return;
         }
         recognizer = loaded.recognizer;
+        tracker.setClassConfidence(recognizer.classConfidence ?? {});
       }
       setPhase("running");
       void tick();
