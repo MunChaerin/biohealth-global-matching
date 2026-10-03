@@ -5,7 +5,7 @@ import Link from "next/link";
 import { CameraIndicator } from "./CameraIndicator";
 import { useTodayMedication } from "./useTodayMedication";
 import type { MedicationItem } from "../../lib/medication/schedule";
-import { clockTime, dueGroup } from "../../lib/medication/autoOpen";
+import { clockTime, dueGroup, openedKey } from "../../lib/medication/autoOpen";
 import { ChatInput } from "./ChatInput";
 import { ChatMessage } from "./ChatMessage";
 import { SafetyNotice } from "./SafetyNotice";
@@ -24,7 +24,7 @@ function localizeInitialMessage(text: string, language: ChatLanguage): string {
 }
 
 const AUTO_OPEN_CHECK_MS = 15_000;
-const AUTO_OPENED_KEY = "carelink.pillAutoOpened"; // 이 기기에서 오늘 자동으로 연 복용 시간 ("환자|날짜|시간")
+const AUTO_OPENED_KEY = "carelink.pillAutoOpened"; // 이 기기에서 오늘 자동으로 연 복용 시간 ("환자|날짜|시간|자동 열림 시각")
 
 function readAutoOpened(patientId: string): string[] {
   try {
@@ -35,10 +35,10 @@ function readAutoOpened(patientId: string): string[] {
   }
 }
 
-function markAutoOpened(patientId: string, date: string, time: string) {
+function markAutoOpened(patientId: string, date: string, time: string, openAt: string) {
   try {
     const all = (JSON.parse(window.localStorage.getItem(AUTO_OPENED_KEY) ?? "[]") as string[]).filter((key) => key.includes(`|${date}|`)); // 지난 날짜는 지움
-    window.localStorage.setItem(AUTO_OPENED_KEY, JSON.stringify([...new Set([...all, `${patientId}|${date}|${time}`])]));
+    window.localStorage.setItem(AUTO_OPENED_KEY, JSON.stringify([...new Set([...all, `${patientId}|${openedKey(date, time, openAt)}`])]));
   } catch {
     // 저장이 안 되면 이번 화면에서만 (다시 열릴 수 있음)
   }
@@ -66,9 +66,14 @@ export function PatientChat() {
     if (!today || pillCheckGroup) return;
     const check = () => {
       const opened = readAutoOpened(persona.id);
-      const due = dueGroup(today, clockTime(), new Set(opened));
+      const now = clockTime();
+      const due = dueGroup(today, now, new Set(opened));
+      if (process.env.NODE_ENV !== "production") {
+        const plan = today.reminders.map((reminder) => `${reminder.time} 복용 -> ${reminder.openAt}${opened.includes(openedKey(today.date, reminder.time, reminder.openAt)) ? " (오늘 열었음)" : ""}`).join(", ");
+        console.debug(`[약 확인 자동 열림] 지금 ${now} | ${plan}${due ? ` | ${due.time} 복용 약을 엽니다` : ""}`);
+      }
       if (!due) return;
-      markAutoOpened(persona.id, today.date, due.time);
+      markAutoOpened(persona.id, today.date, due.time, due.openAt);
       setPillCheckGroup(due.items);
     };
     check();
@@ -200,7 +205,9 @@ export function PatientChat() {
               ? <button type="button" className={styles.completed} disabled>{copy.takenDone}</button>
               : <button type="button" onClick={() => {
                   if (!group.length) return;
-                  if (medication.today) markAutoOpened(persona.id, medication.today.date, group[0]!.time); // 직접 열었으면 그 시간에는 자동으로 다시 열지 않음
+                  // 직접 열었으면 그 시간에는 (지금 정해진 시각으로는) 자동으로 다시 열지 않음
+                  const reminder = medication.today?.reminders.find((item) => item.time === group[0]!.time);
+                  if (medication.today && reminder) markAutoOpened(persona.id, medication.today.date, reminder.time, reminder.openAt);
                   setPillCheckGroup(group);
                 }} disabled={!group.length || !!pillCheckGroup}>{copy.taken}</button>}
           </div>

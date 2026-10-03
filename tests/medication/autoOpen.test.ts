@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { clockTime, dueGroup } from "../../lib/medication/autoOpen";
+import { clockTime, dueGroup, openedKey } from "../../lib/medication/autoOpen";
 import type { MedicationStatus, TodayMedication } from "../../lib/medication/intakeStore";
 
 const item = (id: string, time: string, status: "taken" | "pending") => ({ id, time, status, mismatchCount: 0 }) as unknown as MedicationStatus;
@@ -17,13 +17,20 @@ describe("약 확인 자동 열기", () => {
   });
 
   it("오늘 이미 자동으로 연 시간이거나 다 먹은 시간은 다시 열지 않는다", () => {
-    expect(dueGroup(day(items), "09:00", new Set(["2026-10-03|08:00"]))).toBeNull();
+    expect(dueGroup(day(items), "09:00", new Set([openedKey("2026-10-03", "08:00", "08:00")]))).toBeNull();
     const taken = [item("a-am", "08:00", "taken"), item("a-pm", "18:00", "pending")];
     expect(dueGroup(day(taken), "09:00", new Set())).toBeNull();
   });
 
   it("아침을 못 먹었어도 저녁 시각이 되면 저녁 약을 연다", () => {
-    expect(dueGroup(day(items), "18:05", new Set(["2026-10-03|08:00"]))?.time).toBe("18:00");
+    expect(dueGroup(day(items), "18:05", new Set([openedKey("2026-10-03", "08:00", "08:00")]))?.time).toBe("18:00");
+  });
+
+  it("오늘 이미 열었어도 의료진이 시각을 바꾸면 새 시각에 다시 연다", () => {
+    const opened = new Set([openedKey("2026-10-03", "18:00", "18:00")]); // 기본 18:00에 이미 열림
+    const changed = day(items, [{ time: "08:00", openAt: "08:00" }, { time: "18:00", openAt: "19:06" }]);
+    expect(dueGroup(changed, "19:05", new Set([...opened, openedKey("2026-10-03", "08:00", "08:00")]))).toBeNull();
+    expect(dueGroup(changed, "19:06", new Set([...opened, openedKey("2026-10-03", "08:00", "08:00")]))?.time).toBe("18:00");
   });
 
   it("의료진이 바꾼 시각을 따른다", () => {

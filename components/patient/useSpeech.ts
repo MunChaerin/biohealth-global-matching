@@ -38,6 +38,8 @@ function recognitionErrorMessage(error: string): string {
   return "음성 입력을 시작하지 못했어요. 직접 입력해 주세요.";
 }
 
+const SPEAK_AFTER_CANCEL_MS = 120;
+
 export function useSpeech(language: "ko" | "ja" = "ko") {
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const transcriptHandlerRef = useRef<(text: string) => void>(() => undefined);
@@ -51,7 +53,23 @@ export function useSpeech(language: "ko" | "ja" = "ko") {
     setRecognitionSupported(Boolean(window.SpeechRecognition || window.webkitSpeechRecognition));
     setSynthesisSupported("speechSynthesis" in window && "SpeechSynthesisUtterance" in window);
 
+    // iOS Safari는 사용자가 화면을 터치한 그 순간(이벤트 처리 중)에 한 번 말해야 그 뒤의 음성 안내가 나온다.
+    // 약 확인 안내는 화면 상태가 바뀔 때(터치 밖에서) 말하므로, 처음 터치할 때 소리 없는 문장을 한 번 말해 풀어 둔다.
+    function unlock() {
+      if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window)) return;
+      const silent = new SpeechSynthesisUtterance(" ");
+      silent.volume = 0;
+      window.speechSynthesis.speak(silent);
+      window.speechSynthesis.resume?.();
+      removeUnlock();
+    }
+    function removeUnlock() {
+      for (const type of ["pointerdown", "touchend", "click", "keydown"]) document.removeEventListener(type, unlock, true);
+    }
+    for (const type of ["pointerdown", "touchend", "click", "keydown"]) document.addEventListener(type, unlock, true);
+
     return () => {
+      removeUnlock();
       recognitionRef.current?.stop();
       window.speechSynthesis?.cancel();
     };
@@ -105,14 +123,21 @@ export function useSpeech(language: "ko" | "ja" = "ko") {
   const speak = useCallback((text: string) => {
     if (!("speechSynthesis" in window) || !("SpeechSynthesisUtterance" in window) || !text.trim()) return;
 
-    window.speechSynthesis.cancel();
+    const synth = window.speechSynthesis;
     const utterance = new SpeechSynthesisUtterance(text);
     utterance.lang = language === "ja" ? "ja-JP" : "ko-KR";
     utterance.rate = 0.95;
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = () => setIsSpeaking(false);
-    window.speechSynthesis.speak(utterance);
+    // 말하는 중이면 끊고 새 안내를 말한다. iOS Safari는 cancel() 직후 바로 speak()하면 새 문장이 빠지는 경우가 있어 잠깐 기다린다.
+    if (synth.speaking || synth.pending) {
+      synth.cancel();
+      setTimeout(() => synth.speak(utterance), SPEAK_AFTER_CANCEL_MS);
+    } else {
+      synth.speak(utterance);
+    }
+    synth.resume?.(); // iOS에서 멈춘(paused) 상태로 남는 경우
   }, [language]);
 
   return {

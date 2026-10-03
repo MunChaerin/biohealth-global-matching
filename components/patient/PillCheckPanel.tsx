@@ -6,7 +6,6 @@ import type { MedicationItem } from "../../lib/medication/schedule";
 import { pillImprint, pillName, withParticle } from "../../lib/pill/catalog";
 import type { PillDetection, PillVerdict } from "../../lib/pill/verdict";
 import type { IntakeMethod } from "../../lib/medication/intakeStore";
-import { LYRIBEA } from "../../lib/pill/capsuleOcr";
 import type { DistanceHint } from "../../lib/pill/zoom";
 import type { PillCheckPhase } from "./usePillCheck";
 import styles from "./patient-chat.module.css";
@@ -49,10 +48,7 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
   const label = (item: MedicationItem) => (ja ? item.japaneseName : item.name);
   const dose = (item: MedicationItem) => (ja ? item.japaneseDose : item.dose);
   const appearance = (item: MedicationItem) => (ja ? item.japaneseAppearance : item.appearance);
-  // 리리베아가 남아 있으면 리리베아부터 비추게 한다: 리리베아를 먹고 나면 타이레놀은 각인 확인·사람 확인 없이 판정된다
-  // (리리베아가 남아 있는 동안 타이레놀로 판정되면 리리베아를 잘못 본 것일 수 있어 각인을 확인하는데, 아이패드에서는 거의 못 읽음)
-  const remaining = group.filter((item) => !takenIds.includes(item.id)).sort((a, b) => Number(b.drugCode === LYRIBEA) - Number(a.drugCode === LYRIBEA));
-  const firstPill = remaining.length > 1 && remaining[0]!.drugCode === LYRIBEA ? remaining[0]! : null;
+  const remaining = group.filter((item) => !takenIds.includes(item.id));
   const takenCodes = group.filter((item) => takenIds.includes(item.id)).map((item) => item.drugCode);
   const allDone = remaining.length === 0;
   const matched = verdict.kind === "match" ? remaining.find((item) => item.drugCode === verdict.drugCode) : undefined;
@@ -145,15 +141,14 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
   } else {
     switch (verdict.kind) {
       case "noPill": {
-        const first = firstPill ? (ja ? `まず${label(firstPill)}から` : `${label(firstPill)}부터 `) : "";
         status = ja
-          ? `${first}お薬を1錠だけ、カメラから20〜30cm離して、画面の真ん中の四角の中に見せてください。`
-          : `${first ? `먼저 ${first}` : ""}약을 한 알만, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.`;
+          ? "お薬を1錠だけ、カメラから20〜30cm離して、画面の真ん中の四角の中に見せてください。"
+          : "약을 한 알만, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.";
         const list = remaining.map((item) => `${label(item)} ${dose(item)}`).join(ja ? "、" : ", ");
         speechKey = "start";
         speechText = ja
-          ? `今は${list}を飲む時間です。${first}1錠ずつ、カメラから20〜30cm離して、画面の真ん中の四角の中に見せてください。`
-          : `지금은 ${list} 드실 시간이에요. ${first ? `먼저 ${first}` : ""}한 알씩, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.`;
+          ? `今は${list}を飲む時間です。1錠ずつ、カメラから20〜30cm離して、画面の真ん中の四角の中に見せてください。`
+          : `지금은 ${list} 드실 시간이에요. 한 알씩, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.`;
         break;
       }
       case "multiple":

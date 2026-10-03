@@ -55,6 +55,20 @@ describe("PatientChat", () => {
     expect(screen.queryByRole("dialog", { name: "약 확인" })).not.toBeInTheDocument();
   });
 
+  it("iOS 음성 잠금: 처음 터치할 때 소리 없는 문장을 한 번만 말해 둔다", () => {
+    const speak = vi.fn();
+    vi.stubGlobal("speechSynthesis", { speak, cancel: vi.fn(), resume: vi.fn(), speaking: false, pending: false });
+    vi.stubGlobal("SpeechSynthesisUtterance", class {
+      volume = 1;
+      constructor(public text: string) {}
+    });
+    render(<PatientChat />);
+    fireEvent.pointerDown(document.body);
+    fireEvent.click(document.body);
+    expect(speak).toHaveBeenCalledTimes(1);
+    expect(speak.mock.calls[0]![0]).toMatchObject({ text: " ", volume: 0 });
+  });
+
   it("shows the first question", () => {
     render(<PatientChat />);
     expect(screen.getByText("오늘 가장 불편한 점은 무엇인가요?")).toBeTruthy();
@@ -123,8 +137,9 @@ describe("PatientChat", () => {
 
     await send("허리가 아파요.");
 
-    await waitFor(() => expect(speak).toHaveBeenCalledTimes(1));
-    expect(spokenTexts).toEqual([normalOutput.patientReply]);
+    // 처음 터치할 때 iOS 음성 잠금을 풀려고 말하는 빈 문장(" ")은 빼고 비교
+    await waitFor(() => expect(spokenTexts.filter((text) => text.trim())).toHaveLength(1));
+    expect(spokenTexts.filter((text) => text.trim())).toEqual([normalOutput.patientReply]);
   });
 
   it("prevents duplicate sends while loading", async () => {
