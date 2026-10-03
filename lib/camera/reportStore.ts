@@ -12,14 +12,15 @@ const store: Map<string, CameraReport & { receivedAt: string }> =
 export async function saveCameraReport(report: CameraReport): Promise<boolean> {
   requireProductionStorage();
   if (isSupabaseConfigured()) {
-    const supabase = getSupabaseAdmin();
-    const { data: existing, error: readError } = await supabase.from("camera_reports").select("measured_at").eq("patient_id", report.patientId).maybeSingle();
-    assertSupabaseResult(readError);
-    if (existing && Date.parse(existing.measured_at) > Date.parse(report.measuredAt)) return false;
     const receivedAt = new Date().toISOString();
-    const { error } = await supabase.from("camera_reports").upsert({ patient_id: report.patientId, report, measured_at: report.measuredAt, received_at: receivedAt });
+    const { data, error } = await getSupabaseAdmin().rpc("save_camera_report_if_newer", {
+      p_patient_id: report.patientId,
+      p_report: report,
+      p_measured_at: report.measuredAt,
+      p_received_at: receivedAt,
+    });
     assertSupabaseResult(error);
-    return true;
+    return data === true;
   }
   const existing = store.get(report.patientId);
   if (existing && Date.parse(existing.measuredAt) > Date.parse(report.measuredAt)) return false;

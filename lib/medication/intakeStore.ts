@@ -80,6 +80,18 @@ export async function getTodayMedication(patientId: string, now: Date = new Date
 /** [먹었어요]. 이미 기록돼 있으면 처음 시각을 유지한다. 인식만으로는 기록하지 않는다. */
 export async function recordTaken(patientId: string, medicationId: string, method: IntakeMethod = "camera", now: Date = new Date()): Promise<void> {
   const date = dateKey(now);
+  requireProductionStorage();
+  if (isSupabaseConfigured()) {
+    const { error } = await getSupabaseAdmin().rpc("record_medication_taken", {
+      p_patient_id: patientId,
+      p_intake_date: date,
+      p_medication_id: medicationId,
+      p_taken_at: now.toISOString(),
+      p_method: method,
+    });
+    assertSupabaseResult(error);
+    return;
+  }
   const records = await loadDayRecords(patientId, date);
   const record = records.get(medicationId) ?? { mismatchCount: 0 };
   if (!record.takenAt) await saveRecord(patientId, date, medicationId, { ...record, takenAt: now.toISOString(), method });
@@ -88,6 +100,21 @@ export async function recordTaken(patientId: string, medicationId: string, metho
 /** 알약 인식 결과(사진 없음). 다른 약(mismatched)이면 의료진 화면에 보이도록 횟수와 마지막 약을 센다. */
 export async function recordRecognition(patientId: string, medicationId: string, result: PillRecognitionResult, now: Date = new Date()): Promise<void> {
   const date = dateKey(now);
+  requireProductionStorage();
+  if (isSupabaseConfigured()) {
+    const isMismatch = result.status === "mismatched" && Boolean(result.medicationCode);
+    const { error } = await getSupabaseAdmin().rpc("record_medication_recognition", {
+      p_patient_id: patientId,
+      p_intake_date: date,
+      p_medication_id: medicationId,
+      p_result: result,
+      p_is_mismatch: isMismatch,
+      p_detected_drug_code: isMismatch ? result.medicationCode : null,
+      p_measured_at: result.measuredAt,
+    });
+    assertSupabaseResult(error);
+    return;
+  }
   const records = await loadDayRecords(patientId, date);
   const record = records.get(medicationId) ?? { mismatchCount: 0 };
   const next: IntakeRecord = { ...record, lastRecognition: result };
