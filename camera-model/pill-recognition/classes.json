@@ -1,0 +1,15 @@
+{
+  "description": "알약 인식 모델이 학습하는 10종. 배열 순서 = 학습 클래스 번호. code는 AI Hub 경구약제 데이터의 K-코드이고 웹의 drugCode와 같다. 생김새는 AI Hub 라벨 JSON 기준. 다운로드 양을 줄이려고 시연 약 2종이 든 이미지 zip(TS_3, VS_10) 안에서 나머지 8종을 골랐다.",
+  "classes": [
+    { "code": "K-045037", "name": "리리베아캡슐 50mg", "role": "시연", "zip": "VS_10", "images": 324, "look": "흰/흰 경질캡슐, DWB PGN 50" },
+    { "code": "K-004378", "name": "타이레놀정 500mg", "role": "시연", "zip": "TS_3", "images": 1296, "look": "흰 장방형 필름코팅정, TYLENOL/500" },
+    { "code": "K-044732", "name": "레드리버연질캡슐 350mg", "role": "다른 약 (색 다름)", "zip": "VS_10", "images": 324, "look": "빨강 타원형 연질캡슐, JHRL" },
+    { "code": "K-004268", "name": "듀오락스정 5mg", "role": "다른 약 (색 다름)", "zip": "TS_3", "images": 1296, "look": "노랑 원형 장용정, YI/24" },
+    { "code": "K-003727", "name": "퍼킨정 25-250mg", "role": "다른 약 (색 다름)", "zip": "TS_3", "images": 1296, "look": "파랑 원형, C L" },
+    { "code": "K-005676", "name": "복합파자임이중정", "role": "다른 약 (색 다름)", "zip": "TS_3", "images": 1296, "look": "갈색 타원형 다층정, PΛZ" },
+    { "code": "K-003746", "name": "토파제정", "role": "다른 약 (색 다름)", "zip": "TS_3", "images": 1296, "look": "연두 장방형 장용성 당의정, MKTF" },
+    { "code": "K-005466", "name": "베스자임정", "role": "다른 약 (색 다름)", "zip": "TS_3", "images": 1296, "look": "분홍 타원형 장용정, BSZT" },
+    { "code": "K-005849", "name": "무스판정 500mg", "role": "다른 약 (타이레놀과 비슷한 흰 약)", "zip": "TS_3", "images": 1296, "look": "흰 장방형 필름코팅정, MSP500" },
+    { "code": "K-045269", "name": "독립목클린캡슐 200mg", "role": "다른 약 (리리베아와 비슷한 흰 캡슐)", "zip": "VS_10", "images": 324, "look": "흰/흰 경질캡슐, DLB ACC" }
+  ]
+}

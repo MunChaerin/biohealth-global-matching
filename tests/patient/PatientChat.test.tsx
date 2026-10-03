@@ -37,13 +37,45 @@ describe("PatientChat", () => {
     vi.restoreAllMocks();
   });
 
+  it("약 확인 자동 열림 시각이 지나면 약 확인을 저절로 열고, 같은 날 다시 열지 않는다", async () => {
+    window.localStorage.clear();
+    const { getMedicationSchedule } = await import("../../lib/medication/schedule");
+    const items = getMedicationSchedule("tanaka-haruko").map((item) => ({ ...item, status: "pending", mismatchCount: 0 }));
+    const today = { date: "2026-10-03", items, next: items[0], nextGroup: items.slice(0, 2), reminders: [{ time: "08:00", openAt: "00:00" }, { time: "18:00", openAt: "23:59" }] };
+    vi.mocked(fetch).mockImplementation(async (url) => (String(url).startsWith("/api/medication") ? jsonResponse(today) : jsonResponse({})));
+    const first = render(<PatientChat />);
+    expect(await screen.findByRole("dialog", { name: "약 확인" })).toBeInTheDocument();
+    expect(screen.getByText("리리베아캡슐 50mg 1캡슐")).toBeInTheDocument();
+    first.unmount();
+
+    render(<PatientChat />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.queryByRole("dialog", { name: "약 확인" })).not.toBeInTheDocument();
+  });
+
+  it("iOS 음성 잠금: 처음 터치할 때 소리 없는 문장을 한 번만 말해 둔다", () => {
+    const speak = vi.fn();
+    vi.stubGlobal("speechSynthesis", { speak, cancel: vi.fn(), resume: vi.fn(), speaking: false, pending: false });
+    vi.stubGlobal("SpeechSynthesisUtterance", class {
+      volume = 1;
+      constructor(public text: string) {}
+    });
+    render(<PatientChat />);
+    fireEvent.pointerDown(document.body);
+    fireEvent.click(document.body);
+    expect(speak).toHaveBeenCalledTimes(1);
+    expect(speak.mock.calls[0]![0]).toMatchObject({ text: " ", volume: 0 });
+  });
+
   it("shows the first question", () => {
     render(<PatientChat />);
     expect(screen.getByText("오늘 가장 불편한 점은 무엇인가요?")).toBeTruthy();
   });
 
   it("adds the patient message and displays the chatbot response", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse(normalOutput));
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse(normalOutput));
     render(<PatientChat />);
 
     await send("허리가 아파요.");
@@ -97,7 +129,7 @@ describe("PatientChat", () => {
       onerror: (() => void) | null = null;
       constructor(public text: string) {}
     });
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({
       ...normalOutput,
       speechText: "화면 답변과 다른 낭독 문장",
     }));
@@ -105,8 +137,9 @@ describe("PatientChat", () => {
 
     await send("허리가 아파요.");
 
-    await waitFor(() => expect(speak).toHaveBeenCalledTimes(1));
-    expect(spokenTexts).toEqual([normalOutput.patientReply]);
+    // 처음 터치할 때 iOS 음성 잠금을 풀려고 말하는 빈 문장(" ")은 빼고 비교
+    await waitFor(() => expect(spokenTexts.filter((text) => text.trim())).toHaveLength(1));
+    expect(spokenTexts.filter((text) => text.trim())).toEqual([normalOutput.patientReply]);
   });
 
   it("prevents duplicate sends while loading", async () => {
@@ -117,13 +150,13 @@ describe("PatientChat", () => {
     await send("허리가 아파요.");
     expect(screen.getByRole("button", { name: "전송 중" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "전송 중" }));
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(fetch).mock.calls.filter(([url]) => url === "/api/chat")).toHaveLength(1);
 
     await act(async () => resolveRequest(jsonResponse(normalOutput)));
   });
 
   it("shows a friendly API error", async () => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({ error: "server error" }, 500));
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({ error: "server error" }, 500));
     render(<PatientChat />);
 
     await send("허리가 아파요.");
@@ -135,7 +168,7 @@ describe("PatientChat", () => {
     ["SAFETY_HOLD" as const, "continue" as const],
     ["SYMPTOM_DETAIL" as const, "handoff" as const],
   ])("shows safety guidance for %s or %s", async (conversationState, sessionAction) => {
-    vi.mocked(fetch).mockResolvedValue(jsonResponse({
+    vi.mocked(fetch).mockImplementation(async () => jsonResponse({
       ...normalOutput,
       patientReply: "의료진에게 연결하겠습니다.",
       conversationState,

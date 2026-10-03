@@ -3,6 +3,9 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CameraIndicator } from "./CameraIndicator";
+import { useTodayMedication } from "./useTodayMedication";
+import type { MedicationItem } from "../../lib/medication/schedule";
+import { clockTime, dueGroup, openedKey } from "../../lib/medication/autoOpen";
 import { ChatInput } from "./ChatInput";
 import { ChatMessage } from "./ChatMessage";
 import { SafetyNotice } from "./SafetyNotice";
@@ -20,6 +23,27 @@ function localizeInitialMessage(text: string, language: ChatLanguage): string {
   return text;
 }
 
+const AUTO_OPEN_CHECK_MS = 15_000;
+const AUTO_OPENED_KEY = "carelink.pillAutoOpened"; // 이 기기에서 오늘 자동으로 연 복용 시간 ("환자|날짜|시간|자동 열림 시각")
+
+function readAutoOpened(patientId: string): string[] {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(AUTO_OPENED_KEY) ?? "[]") as string[];
+    return all.filter((key) => key.startsWith(`${patientId}|`)).map((key) => key.slice(patientId.length + 1));
+  } catch {
+    return [];
+  }
+}
+
+function markAutoOpened(patientId: string, date: string, keys: readonly string[]) {
+  try {
+    const all = (JSON.parse(window.localStorage.getItem(AUTO_OPENED_KEY) ?? "[]") as string[]).filter((key) => key.includes(`|${date}|`)); // 지난 날짜는 지움
+    window.localStorage.setItem(AUTO_OPENED_KEY, JSON.stringify([...new Set([...all, ...keys.map((key) => `${patientId}|${key}`)])]));
+  } catch {
+    // 저장이 안 되면 이번 화면에서만 (다시 열릴 수 있음)
+  }
+}
+
 export function PatientChat() {
   const [personaId, setPersonaId] = useState<string | null>(null);
   useEffect(() => {
@@ -34,7 +58,33 @@ export function PatientChat() {
   const [largeText, setLargeText] = useState(false);
   const [motionStatus, setMotionStatus] = useState<"lowMovement" | "still" | null>(null);
   const [explanation, setExplanation] = useState<string | null>(null);
-  const [medicationTaken, setMedicationTaken] = useState(false);
+  const medication = useTodayMedication(persona.id);
+  const [pillCheckGroup, setPillCheckGroup] = useState<MedicationItem[] | null>(null);
+  const [pillDebug, setPillDebug] = useState(false);
+  const today = medication.today;
+  // 시간이 되면(의료진이 정한 자동 열림 시각) 약 확인을 저절로 연다. 같은 복용 시간은 하루에 한 번만 (닫으면 다시 열지 않음)
+  useEffect(() => {
+    if (!today || pillCheckGroup) return;
+    const check = () => {
+      const opened = readAutoOpened(persona.id);
+      const now = clockTime();
+      const due = dueGroup(today, now, new Set(opened));
+      if (process.env.NODE_ENV !== "production") {
+        const plan = today.reminders.map((reminder) => `${reminder.time} 복용 -> ${reminder.openAt}${opened.includes(openedKey(today.date, reminder.time, reminder.openAt)) ? " (오늘 열었음)" : ""}`).join(", ");
+        console.debug(`[약 확인 자동 열림] 지금 ${now} | ${plan}${due ? ` | ${due.time} 복용 약을 엽니다` : ""}`);
+      }
+      if (!due) return;
+      markAutoOpened(persona.id, today.date, due.markKeys); // 이미 지난 시간대도 함께 (닫은 뒤 지난 시간이 이어서 열리지 않게)
+      setPillCheckGroup(due.items);
+    };
+    check();
+    const timer = setInterval(check, AUTO_OPEN_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [today, pillCheckGroup, persona.id]);
+  useEffect(() => {
+    // 알약 인식 모델 없이 화면 흐름을 확인하는 개발용 모드 (?pillDebug=1)
+    setPillDebug(process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("pillDebug") === "1");
+  }, []);
   const language = context.language ?? "ko";
   const isJapanese = language === "ja";
   const copy = isJapanese
@@ -142,11 +192,45 @@ export function PatientChat() {
         <aside className={styles.patientSide}>
           <section className={styles.moodCard}><div className={styles.cardHeading}><div><p>{copy.moodLabel}</p><h2>{localizedObservation.title}</h2></div><span className={styles.moodFace}>☺</span></div><div className={styles.moodMeter}><span style={{ width: `${observation.score}%` }} /><i /></div><div className={styles.moodLabels}><span>{copy.tired}</span><b>{copy.calm}</b></div><p className={styles.subtle}>{localizedObservation.detail}</p></section>
           <section className={styles.careCallCard}><span className={styles.callIcon}>⌁</span><div><p>{copy.help}</p><small>{callStatus ? copy.callConfirm : callAcknowledged ? (isJapanese ? "医療スタッフが確認しました。もう一度必要なときは押してください。" : "의료진이 확인했어요. 다시 도움이 필요하면 눌러 주세요.") : copy.helpHint}</small></div><button type="button" className={callStatus ? styles.called : ""} onClick={() => void callClinician()} disabled={callStatus === "requested"}>{callStatus ? copy.called : copy.call}</button>{callAcknowledged ? <small className={styles.callConfirm}>{isJapanese ? "医療スタッフが確認しました。ボタンをもう一度使えます。" : "의료진이 확인했어요. 버튼을 다시 사용할 수 있어요."}</small> : null}</section>
-          <CameraIndicator language={language} patientId={persona.id} speechAssistActive={speech.isListening} />
+          <CameraIndicator
+            language={language}
+            patientId={persona.id}
+            speechAssistActive={speech.isListening}
+            pillCheck={pillCheckGroup ? {
+              medications: pillCheckGroup,
+              debug: pillDebug,
+              onClose: () => setPillCheckGroup(null),
+              onTaken: () => void medication.refresh(),
+              speak: speech.speak,
+            } : null}
+          />
         </aside>
       </div>
 
-      <div className={styles.bottomGrid}><section className={styles.medicineCard}><div className={styles.cardHeading}><div><p>{copy.medicine}</p><h2>{copy.medicineName}</h2><small>{copy.medicineTime}</small></div><span className={styles.medicineIcon}>＋</span></div><div className={styles.medicineAction}><span>{copy.medicineHint}</span><button type="button" onClick={() => setMedicationTaken(true)} className={medicationTaken ? styles.completed : ""}>{medicationTaken ? copy.takenDone : copy.taken}</button></div></section><section className={styles.easyPlanCard}><div className={styles.planTitle}><span>♡</span><div><p>{copy.planLabel}</p><h2>{explanation ? (isJapanese ? "医療スタッフからの説明" : "의료진이 보낸 설명") : copy.planTitle}</h2></div></div><p>{explanation ?? copy.planText}</p><button type="button" onClick={() => speech.speak(explanation ?? copy.planText)}>{copy.listen}</button></section></div>
+      <div className={styles.bottomGrid}><section className={styles.medicineCard}>{(() => {
+        const next = medication.today?.next ?? null;
+        const group = medication.today?.nextGroup ?? [];
+        const allTaken = !!medication.today && medication.today.items.length > 0 && !next;
+        // 같은 시간에 먹을 약을 한 줄로 (예: 리리베아캡슐 50mg 1캡슐 · 타이레놀정 500mg 1알)
+        const nextName = group.length ? group.map((item) => `${isJapanese ? item.japaneseName : item.name} ${isJapanese ? item.japaneseDose : item.dose}`).join(" · ") : null;
+        return <>
+          <div className={styles.cardHeading}><div><p>{copy.medicine}</p>
+            <h2>{nextName ? nextName : allTaken ? (isJapanese ? "今日のお薬はすべて飲みました" : "오늘 약을 모두 드셨어요") : copy.medicineName}</h2>
+            <small>{next ? `${next.time} · ${group.length > 1 ? (isJapanese ? `${group.length}錠を1錠ずつ確認します` : `${group.length}알을 한 알씩 확인해요`) : isJapanese ? next.japaneseAppearance : next.appearance}` : medication.failed ? (isJapanese ? "服薬予定を読み込めませんでした" : "복약 일정을 불러오지 못했어요") : copy.medicineTime}</small>
+          </div><span className={styles.medicineIcon}>＋</span></div>
+          <div className={styles.medicineAction}><span>{next ? (isJapanese ? "飲む前にカメラでお薬を確認します。" : "드시기 전에 카메라로 약을 확인해요.") : copy.medicineHint}</span>
+            {allTaken
+              ? <button type="button" className={styles.completed} disabled>{copy.takenDone}</button>
+              : <button type="button" onClick={() => {
+                  if (!group.length) return;
+                  // 직접 열었으면 그 시간에는 (지금 정해진 시각으로는) 자동으로 다시 열지 않음
+                  const reminder = medication.today?.reminders.find((item) => item.time === group[0]!.time);
+                  if (medication.today && reminder) markAutoOpened(persona.id, medication.today.date, [openedKey(medication.today.date, reminder.time, reminder.openAt)]);
+                  setPillCheckGroup(group);
+                }} disabled={!group.length || !!pillCheckGroup}>{copy.taken}</button>}
+          </div>
+        </>;
+      })()}</section><section className={styles.easyPlanCard}><div className={styles.planTitle}><span>♡</span><div><p>{copy.planLabel}</p><h2>{explanation ? (isJapanese ? "医療スタッフからの説明" : "의료진이 보낸 설명") : copy.planTitle}</h2></div></div><p>{explanation ?? copy.planText}</p><button type="button" onClick={() => speech.speak(explanation ?? copy.planText)}>{copy.listen}</button></section></div>
       <p className={styles.footnote}>{copy.footer}</p>
     </main>
   );

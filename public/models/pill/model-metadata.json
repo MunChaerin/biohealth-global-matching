@@ -1,0 +1,86 @@
+{
+  "modelVersion": "pill-yolo11n-10cls-v3",
+  "task": "detection",
+  "architecture": "YOLO11n (Ultralytics), 알약 위치 + 10종 분류",
+  "file": "pill_classifier.onnx",
+  "fileSizeMB": 10.6,
+  "input": {
+    "name": "images",
+    "shape": [
+      1,
+      3,
+      640,
+      640
+    ],
+    "dtype": "float32",
+    "layout": "NCHW",
+    "colorOrder": "RGB",
+    "normalization": "픽셀값 / 255 (0~1), 평균·표준편차 정규화 없음",
+    "resize": "비율 유지 레터박스 640x640, 가운데 배치, 여백은 회색 (114,114,114)"
+  },
+  "output": {
+    "name": "output0",
+    "shape": [
+      1,
+      14,
+      8400
+    ],
+    "format": "후보 8400개 x (cx, cy, w, h [입력 픽셀 기준] + 클래스별 점수 0~1). NMS는 웹에서 (클래스 구분 없이, IoU 0.5 또는 작은 박스가 70% 이상 포함)"
+  },
+  "classOrder": [
+    "K-045037",
+    "K-004378",
+    "K-044732",
+    "K-004268",
+    "K-003727",
+    "K-005676",
+    "K-003746",
+    "K-005466",
+    "K-005849",
+    "K-045269"
+  ],
+  "thresholds": {
+    "detect": 0.4,
+    "confidence": 0.6,
+    "stableMs": 1000,
+    "mismatchConfidence": 0.9,
+    "mismatchStableMs": 3000,
+    "classConfidence": {
+      "K-045037": 0.75
+    }
+  },
+  "trainedAt": "2026-10-03",
+  "exportedAt": "2026-10-03",
+  "dataset": "AI Hub 경구약제 이미지 데이터(576) 중 10종 (TS_3, VS_10) + 배경 합성. 돌린 각도 기준 학습/검증/시험 분리. v2: COCO val2017 일상 사진을 잘라 '알약 없음'(빈 라벨)으로 학습 2,000 / 검증 200장 추가, 배경 시험 500장",
+  "testMetrics": {
+    "mAP50": 0.9949,
+    "mAP50_95": 0.9237,
+    "overall_correct": 0.9776,
+    "overall_wrong_pill": 0.0,
+    "background": {
+      "images": 500,
+      "anyBox": 0.018,
+      "pillLevel": 0.008,
+      "mismatchLevel": 0.0
+    },
+    "ownTest": {
+      "verdict": {
+        "리리베아캡슐 50mg": {
+          "images": 10,
+          "correct": 0.7,
+          "unsure": 0.2
+        },
+        "타이레놀정 500mg": {
+          "images": 10,
+          "correct": 0.9,
+          "unsure": 0.1
+        }
+      },
+      "confusions": {
+        "리리베아캡슐 50mg -> 타이레놀정 500mg": 1
+      },
+      "overall_correct": 0.8,
+      "overall_wrong_pill": 0.05
+    }
+  }
+}
