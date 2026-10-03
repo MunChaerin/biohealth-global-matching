@@ -9,6 +9,7 @@ import { useEffect, useState } from "react";
 
 export type RearCameraState =
   | "idle" // 약 확인 중이 아님
+  | "waiting" // 전면 카메라가 완전히 꺼지기를 기다리는 중 (iOS는 카메라를 한 번에 하나만 씀)
   | "trying" // 후면 카메라를 켜는 중
   | "rear" // 후면 카메라 사용 중
   | "unavailable"; // 후면 카메라가 없거나 켤 수 없음 -> 전면으로 대신
@@ -17,6 +18,7 @@ const REAR_CONSTRAINTS: MediaStreamConstraints = {
   video: { facingMode: { exact: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
   audio: false,
 };
+const RELEASE_DELAY_MS = 200; // 전면을 끈 뒤 iOS가 카메라를 놓을 시간
 
 // 후면 카메라가 없는 기기에서 약 확인 때마다 전면 카메라를 껐다 켜지 않도록, 이 화면을 연 동안 기억한다.
 let rearKnownUnavailable = false;
@@ -26,53 +28,90 @@ export function resetRearCameraMemory() {
   rearKnownUnavailable = false;
 }
 
-export function useRearCamera(active: boolean, video: HTMLVideoElement | null) {
+/** 후면 카메라가 없다고 이미 알고 있는지 (그러면 약 확인 때 전면을 끄지 않는다) */
+export function rearCameraKnownUnavailable() {
+  return rearKnownUnavailable;
+}
+
+/**
+ * active: 약 확인 중, frontReleased: 전면 카메라 요청·스트림이 모두 끝남.
+ * 전면이 완전히 꺼진 뒤에만 후면을 요청하고, 후면 트랙이 우리가 끄지 않았는데 끝나면(iOS가 종료) 한 번 다시 요청한다.
+ */
+export function useRearCamera(active: boolean, video: HTMLVideoElement | null, frontReleased: boolean) {
   const [state, setState] = useState<RearCameraState>("idle");
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const known = active && rearKnownUnavailable;
+  const ready = active && !rearKnownUnavailable && frontReleased;
 
-  // 후면 카메라 켜기 / 끄기
   useEffect(() => {
-    if (!active) {
-      setState("idle");
-      return;
-    }
-    if (rearKnownUnavailable || typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
+    if (!active) setState("idle");
+    else if (known) setState("unavailable");
+    else if (!ready) setState("waiting");
+  }, [active, known, ready]);
+
+  // 후면 카메라 켜기 / 끄기 (전면이 완전히 꺼진 뒤에만)
+  useEffect(() => {
+    if (!ready) return;
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
       setState("unavailable");
       return;
     }
     let cancelled = false;
     let opened: MediaStream | null = null;
-    setState("trying");
-    navigator.mediaDevices
-      .getUserMedia(REAR_CONSTRAINTS)
-      .then((result) => {
-        if (cancelled) {
-          result.getTracks().forEach((track) => track.stop());
-          return;
-        }
-        opened = result;
-        const settings = result.getVideoTracks?.()[0]?.getSettings?.();
-        const nextSize = settings?.width && settings?.height ? { width: settings.width, height: settings.height } : null;
-        if (nextSize) console.info(`[카메라] 알약 확인: 후면 카메라 ${nextSize.width}x${nextSize.height}`);
-        setSize(nextSize);
-        setStream(result);
-        setState("rear");
-      })
-      .catch((error: unknown) => {
+
+    function stopOpened() {
+      const current = opened;
+      opened = null;
+      current?.getTracks().forEach((track) => track.stop());
+    }
+
+    async function open(retry: boolean) {
+      setState("trying");
+      let result: MediaStream;
+      try {
+        result = await navigator.mediaDevices.getUserMedia(REAR_CONSTRAINTS);
+      } catch (error) {
         if (cancelled) return;
         // 권한 거부는 기기 문제가 아니므로 기억하지 않는다 (전면 카메라 쪽에서 권한 안내)
-        if (!(error instanceof DOMException && error.name === "NotAllowedError")) rearKnownUnavailable = true;
+        if (!retry && !(error instanceof DOMException && error.name === "NotAllowedError")) rearKnownUnavailable = true;
         console.info("[카메라] 후면 카메라를 쓸 수 없어 전면 카메라로 확인합니다.", error);
         setState("unavailable");
+        return;
+      }
+      if (cancelled) {
+        result.getTracks().forEach((track) => track.stop());
+        return;
+      }
+      opened = result;
+      const track = result.getVideoTracks?.()[0];
+      // 우리가 끄지 않았는데 트랙이 끝나면(iOS가 다른 카메라 요청 때문에 종료 등) 한 번 다시 요청, 또 끝나면 전면으로
+      track?.addEventListener?.("ended", () => {
+        if (cancelled || opened !== result) return;
+        console.warn(`[카메라] 후면 카메라 트랙이 종료됨${retry ? " (다시 요청 후에도) -> 전면으로 대신" : " -> 한 번 다시 요청"}`);
+        stopOpened();
+        setStream(null);
+        if (retry) setState("unavailable");
+        else void open(true);
       });
+      const settings = track?.getSettings?.();
+      const nextSize = settings?.width && settings?.height ? { width: settings.width, height: settings.height } : null;
+      if (nextSize) console.info(`[카메라] 알약 확인: 후면 카메라 ${nextSize.width}x${nextSize.height}`);
+      setSize(nextSize);
+      setStream(result);
+      setState("rear");
+    }
+
+    // 전면을 끈 직후 바로 요청하지 않고 잠깐 기다린다
+    const timer = setTimeout(() => void open(false), RELEASE_DELAY_MS);
     return () => {
       cancelled = true;
-      opened?.getTracks().forEach((track) => track.stop());
+      clearTimeout(timer);
+      stopOpened();
       setStream(null);
       setSize(null);
     };
-  }, [active]);
+  }, [ready]);
 
   // 같은 video 요소에 후면 영상을 연결 (전면 카메라는 이때 꺼져 있음)
   useEffect(() => {

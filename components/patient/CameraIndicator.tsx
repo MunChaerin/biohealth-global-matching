@@ -7,7 +7,7 @@ import type { MedicationItem } from "../../lib/medication/schedule";
 import { PillCheckPanel } from "./PillCheckPanel";
 import { sendReport, useFaceExpression, type ExpressionAnalysis, type MouthAssistStatus } from "./useFaceExpression";
 import { usePillCheck } from "./usePillCheck";
-import { useRearCamera } from "./useRearCamera";
+import { rearCameraKnownUnavailable, useRearCamera } from "./useRearCamera";
 import styles from "./patient-chat.module.css";
 
 // 환자가 카메라를 켜기로 동의했는지. 한 번 정하면 이 기기에서 기억하고, 언제든 끌 수 있다.
@@ -74,16 +74,21 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
   const [pillCameraAllowed, setPillCameraAllowed] = useState(false);
   // 이번 약 확인에서 [먹었어요]를 누른 약 (같은 시간에 여러 알일 때 남은 약을 계속 확인)
   const [takenIds, setTakenIds] = useState<string[]>([]);
+  // 이번 약 확인에서 후면 카메라를 쓸 수 없다고 확정됨 -> 전면으로 대신
+  const [rearUnavailable, setRearUnavailable] = useState(false);
   const pillMode = !!pillCheck;
   const pillGroup = pillCheck?.medications ?? [];
   const remainingPills = pillGroup.filter((item) => !takenIds.includes(item.id));
   const cameraEnabled = consent === "on" || (pillMode && pillCameraAllowed);
   const analysis: ExpressionAnalysis = pillMode ? (consent === "on" ? "paused" : "off") : "on";
   // 알약 확인은 후면 카메라(자동 초점)로. 후면을 켜는 동안·쓰는 동안 전면(표정 관찰) 카메라는 끈다 (한 번에 하나만)
+  // 약 확인 중에는 후면을 쓸 수 없다고 확정되기 전까지 전면을 요청하지 않는다 (늦게 도착한 전면 요청이 iOS에서 후면 트랙을 끊음)
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
-  const rear = useRearCamera(pillMode && cameraEnabled, videoElement);
-  const usingRear = pillMode && (rear.state === "trying" || rear.state === "rear");
-  const { videoRef, status, previewFilter, correctedFrame, cameraSize } = useFaceExpression(cameraEnabled && !usingRear, patientId, setMouthStatus, analysis);
+  const pillCameraActive = pillMode && cameraEnabled;
+  const usingRear = pillCameraActive && !(rearCameraKnownUnavailable() || rearUnavailable);
+  const { videoRef, status, previewFilter, correctedFrame, cameraSize, captureOpen } = useFaceExpression(cameraEnabled && !usingRear, patientId, setMouthStatus, analysis);
+  const rear = useRearCamera(pillCameraActive, videoElement, !captureOpen);
+  useEffect(() => setRearUnavailable(rear.state === "unavailable"), [rear.state]);
   const frontWorking = cameraEnabled && !usingRear && status !== "off" && status !== "starting" && status !== "permissionDenied" && status !== "unavailable";
   const cameraWorking = (pillMode && rear.state === "rear") || frontWorking;
   const pill = usePillCheck({
@@ -107,6 +112,20 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
     setConsent(readConsent());
     setLoaded(true);
   }, []);
+
+  // 개발 중: 약 확인 동안 1초마다 영상·트랙 상태를 콘솔에 남긴다 (iOS에서 카메라가 끊기는지 확인용)
+  useEffect(() => {
+    if (!pillMode || process.env.NODE_ENV === "production" || !videoElement) return;
+    const timer = setInterval(() => {
+      const track = (videoElement.srcObject as MediaStream | null)?.getVideoTracks?.()[0];
+      console.debug(
+        `[카메라 상태] video.readyState ${videoElement.readyState}, ${videoElement.videoWidth}x${videoElement.videoHeight}, paused ${videoElement.paused}` +
+          (track ? `, track ${track.readyState} muted ${track.muted} "${track.label}"` : ", track 없음") +
+          `, 후면 ${rear.state}`,
+      );
+    }, 1_000);
+    return () => clearInterval(timer);
+  }, [pillMode, videoElement, rear.state]);
 
   // 후면 카메라로 약을 확인하는 동안 표정 관찰은 멈춰 있으므로, 표정 관찰에 동의한 환자면 의료진 화면에 알린다
   const rearActive = pillMode && rear.state === "rear";

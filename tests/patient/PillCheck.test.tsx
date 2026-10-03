@@ -295,6 +295,56 @@ describe("알약 확인 모드", () => {
     await waitFor(() => expect(frontCalls(getUserMedia)).toBe(2)); // 표정 관찰 카메라 다시 켬
   });
 
+  it("iOS: 늦게 도착하는 전면 요청이 끝나고 전면을 끈 뒤에만 후면을 요청한다", async () => {
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    const front = { stop: vi.fn() };
+    const rearTrack = Object.assign(new EventTarget(), { stop: vi.fn(), getSettings: () => ({ width: 1080, height: 1920 }) });
+    let resolveFront: (stream: unknown) => void = () => {};
+    const order: string[] = [];
+    front.stop.mockImplementation(() => order.push("front stop"));
+    const getUserMedia = vi.fn((constraints: MediaStreamConstraints) => {
+      if (wantsRear(constraints)) {
+        order.push("rear request");
+        return Promise.resolve({ getTracks: () => [rearTrack], getVideoTracks: () => [rearTrack] });
+      }
+      order.push("front request");
+      return new Promise((resolve) => (resolveFront = resolve)); // 응답이 늦게 옴
+    });
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+
+    const { rerender } = render(<CameraIndicator patientId="tanaka-haruko" />);
+    await waitFor(() => expect(order).toEqual(["front request"]));
+    // 전면 응답이 오기 전에 약 확인 시작
+    rerender(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    });
+    expect(order).toEqual(["front request"]); // 아직 후면을 요청하지 않음
+    await act(async () => resolveFront({ getTracks: () => [front] }));
+    await waitFor(() => expect(order).toEqual(["front request", "front stop", "rear request"]));
+    expect(await screen.findByText("후면 1080x1920")).toBeInTheDocument();
+  });
+
+  it("iOS가 후면 트랙을 끊으면 한 번 다시 요청하고, 또 끊기면 전면으로 대신한다", async () => {
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    const tracks: (EventTarget & { stop: () => void })[] = [];
+    const getUserMedia = vi.fn(async (constraints: MediaStreamConstraints) => {
+      if (!wantsRear(constraints)) return { getTracks: () => [{ stop: vi.fn() }] };
+      const track = Object.assign(new EventTarget(), { stop: vi.fn(), getSettings: () => ({ width: 1920, height: 1080 }) });
+      tracks.push(track);
+      return { getTracks: () => [track], getVideoTracks: () => [track] };
+    });
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+
+    render(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
+    await waitFor(() => expect(tracks).toHaveLength(1));
+    await act(async () => void tracks[0]!.dispatchEvent(new Event("ended")));
+    await waitFor(() => expect(tracks).toHaveLength(2)); // 한 번 다시 요청
+    await act(async () => void tracks[1]!.dispatchEvent(new Event("ended")));
+    await waitFor(() => expect(frontCalls(getUserMedia)).toBe(1)); // 전면으로 대신
+    expect(tracks).toHaveLength(2);
+  });
+
   it("학습한 모델이 아직 없으면 준비 전이라고 안내한다", async () => {
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();

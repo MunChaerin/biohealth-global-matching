@@ -103,6 +103,9 @@ export function useFaceExpression(
   // 알약 확인도 같은 밝기 보정을 쓰도록 바깥에 꺼내 둔다 (카메라가 켜져 있을 때만 값이 있음)
   const correctedFrameRef = useRef<((video: HTMLVideoElement) => HTMLVideoElement | HTMLCanvasElement) | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  // 전면 카메라 요청이 진행 중이거나 켜져 있는지. iOS는 카메라를 한 번에 하나만 쓰므로, 후면을 열기 전에
+  // 이 값이 false가 될 때까지(늦게 도착하는 전면 요청까지 끝날 때까지) 기다린다.
+  const [captureOpen, setCaptureOpen] = useState(false);
   const [cameraSize, setCameraSize] = useState<{ width: number; height: number } | null>(null);
   // analysis가 "on"이 아니면 알약 확인 중 (CameraIndicator 참고)
   const pillMode = analysis !== "on";
@@ -205,21 +208,31 @@ export function useFaceExpression(
       timer = setTimeout(tick, SAMPLE_INTERVAL_MS);
     }
 
+    function stopStream() {
+      stream?.getTracks().forEach((track) => track.stop());
+      setCaptureOpen(false);
+    }
+
     async function start() {
+      setCaptureOpen(true);
+      let opened: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        opened = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false,
         });
       } catch (error) {
+        setCaptureOpen(false);
         if (!cancelled) report(cameraErrorStatus(error), true);
         return;
       }
-      // 기다리는 동안 화면이 닫혔으면(또는 개발 모드에서 effect가 두 번 실행되면) 바로 끈다
+      // 기다리는 동안 화면이 닫혔으면(또는 개발 모드에서 effect가 두 번 실행되면, 약 확인으로 후면 카메라를 쓰게 되면) 바로 끈다
       if (cancelled) {
-        stream.getTracks().forEach((track) => track.stop());
+        opened.getTracks().forEach((track) => track.stop());
+        setCaptureOpen(false);
         return;
       }
+      stream = opened;
       try {
         filterMediapipeInfoLogs();
         const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision");
@@ -236,21 +249,21 @@ export function useFaceExpression(
         landmarker = created;
       } catch (error) {
         console.error("face landmarker load error", error);
-        stream.getTracks().forEach((track) => track.stop()); // 분석을 못 하면 카메라도 끈다
+        stopStream(); // 분석을 못 하면 카메라도 끈다
         if (!cancelled) report("unavailable", true);
         return;
       }
 
       const video = videoRef.current;
       if (!video) {
-        stream.getTracks().forEach((track) => track.stop());
+        stopStream();
         return;
       }
       video.srcObject = stream;
       try {
         await video.play();
       } catch (error) {
-        stream.getTracks().forEach((track) => track.stop());
+        stopStream();
         if (!cancelled) report(cameraErrorStatus(error), true);
         return;
       }
@@ -274,7 +287,8 @@ export function useFaceExpression(
       streamRef.current = null;
       setCameraSize(null);
       if (timer) clearTimeout(timer);
-      stream?.getTracks().forEach((track) => track.stop());
+      // 이미 받은 스트림은 바로 끈다. 아직 요청 중이면 도착했을 때 start()에서 끄고 captureOpen을 내린다
+      if (stream) stopStream();
       landmarker?.close();
     };
   }, [enabled, patientId, onMouthStatus]);
@@ -294,5 +308,5 @@ export function useFaceExpression(
     };
   }, [pillMode]);
 
-  return { videoRef, status, previewFilter, correctedFrame: correctedFrameRef, cameraSize };
+  return { videoRef, status, previewFilter, correctedFrame: correctedFrameRef, cameraSize, captureOpen };
 }
