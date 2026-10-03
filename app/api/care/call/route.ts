@@ -4,7 +4,7 @@ import { acknowledgeCareCall, getCareCall, requestCareCall } from "../../../../l
 export async function GET(request: Request) {
   const patientId = new URL(request.url).searchParams.get("patientId");
   if (!patientId) return NextResponse.json({ error: "patientId가 필요합니다." }, { status: 400 });
-  return NextResponse.json({ call: getCareCall(patientId) });
+  return NextResponse.json({ call: await getCareCall(patientId) });
 }
 
 export async function POST(request: Request) {
@@ -15,6 +15,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "JSON 본문이 필요합니다." }, { status: 400 });
   }
   if (!body.patientId) return NextResponse.json({ error: "patientId가 필요합니다." }, { status: 400 });
-  if (body.action === "acknowledge") return NextResponse.json({ call: acknowledgeCareCall(body.patientId) });
-  return NextResponse.json({ call: requestCareCall(body.patientId, body.sessionId ?? "") });
+  if (body.action === "acknowledge") return NextResponse.json({ call: await acknowledgeCareCall(body.patientId) });
+  return NextResponse.json({ call: await requestCareCall(body.patientId, body.sessionId ?? "") });
 }

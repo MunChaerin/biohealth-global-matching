@@ -28,7 +28,7 @@ export async function POST(request: Request) {
   const denied = demoGuard(body.patientId);
   if (denied) return denied;
 
-  saveCameraReport(body);
+  await saveCameraReport(body);
   return NextResponse.json({ ok: true });
 }
 
@@ -37,5 +37,5 @@ export async function GET(request: Request) {
   const patientId = new URL(request.url).searchParams.get("patientId");
   const denied = demoGuard(patientId);
   if (denied) return denied;
-  return NextResponse.json({ report: getCameraReport(patientId!) });
+  return NextResponse.json({ report: await getCameraReport(patientId!) });
 }
