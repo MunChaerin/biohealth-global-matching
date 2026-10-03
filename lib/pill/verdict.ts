@@ -5,11 +5,15 @@ export interface PillDetection {
   drugCode: string; // 모델 클래스에 해당하는 약 코드
   confidence: number; // 0~1
   box?: readonly [number, number, number, number]; // 정규화 좌표 [x, y, w, h]
+  second?: { drugCode: string; confidence: number }; // 같은 박스에서 두 번째로 높은 약
 }
 
 export const DETECT_MIN_CONFIDENCE = 0.4; // 이보다 낮은 검출은 알약으로 보지 않음
 export const CONFIDENT = 0.6; // 이보다 낮으면 어떤 약인지 "잘 모르겠어요" (학습한 10종 밖의 약 오인 방지)
 export const STABLE_MS = 1_000; // 같은 약이 이만큼 이어져야 판정
+// 이번 시간에 먹는 약이 2개 이상일 때 1등·2등이 모두 이번 시간 약이면, 점수 차이가 이만큼 날 때만 판정한다
+// (v3 아이패드 테스트: 리리베아 앞면을 타이레놀로 판정 -> 아침에 둘 다 먹으므로 "맞아요! 타이레놀"로 잘못 기록될 수 있었음)
+export const GROUP_MARGIN = 0.3;
 // 판정 중인 약이 한 프레임만 흔들려도(기준 아래·잠깐 안 보임) 처음부터 다시 세면, 한 번 판정에 시간이 걸리는 기기
 // (아이패드: 1초에 1~2프레임)에서는 판정이 거의 안 난다. 이만큼 연속으로 흔들릴 때까지는 이어서 센다.
 export const MAX_MISSES = 1;
@@ -24,14 +28,14 @@ export type PillReading =
   | { kind: "noPill" }
   | { kind: "multiple" }
   | { kind: "unsure" }
-  | { kind: "pill"; drugCode: string; confidence: number; box?: PillDetection["box"] };
+  | { kind: "pill"; drugCode: string; confidence: number; box?: PillDetection["box"]; second?: PillDetection["second"] };
 
 export type PillVerdict =
   | { kind: "noPill" } // 알약이 안 보임
   | { kind: "multiple" } // 여러 알이 보임 -> 한 알씩
   | { kind: "unsure" } // 어떤 약인지 확신이 낮음
   | { kind: "checking"; drugCode: string } // 같은 약이 보이는 중, 판정 대기
-  | { kind: "match"; drugCode: string; confidence?: number; box?: PillDetection["box"]; byPerson?: boolean } // box: 확대 사진용, byPerson: 사진을 보고 환자가 [맞아요]로 정함
+  | { kind: "match"; drugCode: string; confidence?: number; box?: PillDetection["box"]; byPerson?: boolean; byOcr?: boolean } // box: 확대 사진용, byPerson: 사진을 보고 환자가 정함, byOcr: 각인으로 바로잡음
   | { kind: "mismatch"; drugCode: string; confidence?: number; box?: PillDetection["box"] };
 
 /** 알약으로 셀 검출만 남긴다 (확신 높은 순). 0.83 옆의 0.48처럼 많이 약한 박스는 버린다. */
@@ -48,7 +52,7 @@ export function readDetections(detections: readonly PillDetection[]): PillReadin
   if (found.length > 1) return { kind: "multiple" };
   const [pill] = found;
   if (pill!.confidence < CONFIDENT) return { kind: "unsure" };
-  return { kind: "pill", drugCode: pill!.drugCode, confidence: pill!.confidence, box: pill!.box };
+  return { kind: "pill", drugCode: pill!.drugCode, confidence: pill!.confidence, box: pill!.box, second: pill!.second };
 }
 
 /**
@@ -105,6 +109,12 @@ export class PillVerdictTracker {
     if (!expected && !this.taken.has(reading.drugCode)) return this.miss({ kind: "unsure" });
     const needed = expected ? (this.classConfidence[reading.drugCode] ?? CONFIDENT) : MISMATCH_CONFIDENT;
     if (reading.confidence < needed) return this.miss({ kind: "unsure" });
+    // 같이 먹는 약끼리 헷갈림: 1등·2등이 모두 이번 시간 약이면 점수 차이가 GROUP_MARGIN 이상일 때만
+    const group = new Set([...this.expected, ...this.taken]);
+    const second = reading.second;
+    if (group.size >= 2 && second && second.drugCode !== reading.drugCode && group.has(second.drugCode) && reading.confidence - second.confidence < GROUP_MARGIN) {
+      return this.miss({ kind: "unsure" });
+    }
     this.misses = 0;
     if (this.candidate?.drugCode !== reading.drugCode) {
       this.candidate = { drugCode: reading.drugCode, since: timeMs };

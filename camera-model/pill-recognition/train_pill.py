@@ -99,11 +99,14 @@ def verdict_accuracy(model: YOLO, folder: Path, classes: list[dict]) -> dict | N
     correct = Counter()
     wrong_as = Counter()
     unsure = Counter()
+    top1_as = Counter()  # 기준과 상관없이 1등 클래스가 다른 약인 경우 (같이 먹는 약끼리 착각 보기)
     for image in images:
         truth = int((folder / "labels" / f"{image.stem}.txt").read_text().split()[0])
         per_class[truth] += 1
         result = model.predict(str(image), imgsz=IMG_SIZE, conf=DETECT_MIN, verbose=False)[0]
         found = [(int(c), float(p)) for c, p in zip(result.boxes.cls.tolist(), result.boxes.conf.tolist())]
+        if found and max(found, key=lambda f: f[1])[0] != truth:
+            top1_as[(truth, max(found, key=lambda f: f[1])[0])] += 1
         if len(found) == 1 and found[0][1] >= CLASS_CONFIDENCE.get(classes[found[0][0]]["code"], CONFIDENT):
             if found[0][0] == truth:
                 correct[truth] += 1
@@ -123,6 +126,9 @@ def verdict_accuracy(model: YOLO, folder: Path, classes: list[dict]) -> dict | N
         "confusions": {f"{classes[t]['name']} -> {classes[p]['name']}": n for (t, p), n in wrong_as.most_common()},
         "overall_correct": round(sum(correct.values()) / max(1, sum(per_class.values())), 4),
         "overall_wrong_pill": round(sum(wrong_as.values()) / max(1, sum(per_class.values())), 4),
+        "top1Confusions": {f"{classes[t]['name']} -> {classes[p]['name']}": n for (t, p), n in top1_as.most_common()},
+        # 시연에서 가장 위험한 경우: 아침·저녁에 같이 먹는 리리베아를 타이레놀로 보는 비율 (기준과 상관없이 1등 기준)
+        "lyribeaAsTylenol": round(top1_as[(0, 1)] / per_class[0], 3) if per_class[0] else None,
     }
 
 

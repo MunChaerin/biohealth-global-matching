@@ -66,8 +66,13 @@ export async function detectWithZoom(recognizer: PillRecognizer, frame: HTMLVide
   return { detections: useZoomed ? zoomed : inGuide, guide: inGuide, zoomed };
 }
 
-/** 개발용 로그 한 줄: "네모 무스판정 0.70 -> 확대 타이레놀정 0.88" */
+/** 개발용 로그 한 줄: "네모 무스판정 0.70 (2등 타이레놀정 0.41) -> 확대 타이레놀정 0.88 (2등 …)" */
 export function describeDetections(result: ZoomedDetections, name: (code: string) => string): string {
-  const show = (items: PillDetection[]) => (items.length ? items.map((item) => `${name(item.drugCode)} ${item.confidence.toFixed(2)}`).join(", ") : "없음");
+  const show = (items: PillDetection[]) =>
+    items.length
+      ? items
+          .map((item) => `${name(item.drugCode)} ${item.confidence.toFixed(2)}${item.second ? ` (2등 ${name(item.second.drugCode)} ${item.second.confidence.toFixed(2)})` : ""}`)
+          .join(", ")
+      : "없음";
   return `네모 ${show(result.guide)}${result.zoomed ? ` -> 확대 ${show(result.zoomed)}` : ""}`;
 }

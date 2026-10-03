@@ -55,6 +55,12 @@ describe("detectWithZoom", () => {
     expect(describeDetections(result, (code) => (code === tylenol.drugCode ? "타이레놀" : "무스판"))).toBe("네모 무스판 0.70 -> 확대 타이레놀 0.88");
   });
 
+  it("로그에 2등 클래스와 점수도 같이 남긴다", () => {
+    const withSecond = { ...tylenol, second: { drugCode: "K-045037", confidence: 0.61 } };
+    const text = describeDetections({ detections: [withSecond], guide: [withSecond], zoomed: null }, (code) => (code === "K-045037" ? "리리베아" : "타이레놀"));
+    expect(text).toBe("네모 타이레놀 0.88 (2등 리리베아 0.61)");
+  });
+
   it("옆의 약한 박스는 알약으로 세지 않으므로 확대가 켜진다", async () => {
     const { recognizer, detect } = fakeRecognizer([tylenol, weak], [tylenol]);
     expect((await detectWithZoom(recognizer, frame)).zoomed).toEqual([tylenol]);

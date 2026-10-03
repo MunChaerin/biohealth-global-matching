@@ -30,6 +30,8 @@ interface RawBox {
   y2: number;
   score: number;
   classIndex: number;
+  secondScore: number;
+  secondClass: number;
 }
 
 export const CONTAIN_THRESHOLD = 0.7; // 작은 박스가 이 비율 이상 다른 박스 안에 들어가 있으면 같은 알약 (알약 전체와 반쪽 등)
@@ -67,11 +69,18 @@ export function decodeYoloOutput(
   for (let i = 0; i < count; i += 1) {
     let best = 0;
     let bestClass = 0;
+    let second = 0;
+    let secondClass = -1;
     for (let c = 0; c < classCount; c += 1) {
       const score = data[(4 + c) * count + i]!;
       if (score > best) {
+        second = best;
+        secondClass = best > 0 ? bestClass : -1;
         best = score;
         bestClass = c;
+      } else if (score > second) {
+        second = score;
+        secondClass = c;
       }
     }
     if (best < minScore) continue;
@@ -79,7 +88,7 @@ export function decodeYoloOutput(
     const cy = data[count + i]!;
     const w = data[2 * count + i]!;
     const h = data[3 * count + i]!;
-    candidates.push({ x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2, score: best, classIndex: bestClass });
+    candidates.push({ x1: cx - w / 2, y1: cy - h / 2, x2: cx + w / 2, y2: cy + h / 2, score: best, classIndex: bestClass, secondScore: second, secondClass });
   }
 
   candidates.sort((a, b) => b.score - a.score);
@@ -97,6 +106,8 @@ export function decodeYoloOutput(
       drugCode: classes[item.classIndex]!,
       confidence: item.score,
       box: [x1 / box.sourceWidth, y1 / box.sourceHeight, (x2 - x1) / box.sourceWidth, (y2 - y1) / box.sourceHeight] as const,
+      // 같은 박스에서 두 번째로 높은 약 (같이 먹는 약끼리 헷갈리는지 보기 위해)
+      ...(item.secondClass >= 0 ? { second: { drugCode: classes[item.secondClass]!, confidence: item.secondScore } } : {}),
     };
   });
 }

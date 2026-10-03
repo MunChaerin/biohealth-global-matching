@@ -8,19 +8,22 @@
 
 export const LYRIBEA = "K-045037"; // 리리베아캡슐 50mg, 각인 DWB / PGN 50
 export const DOKRIP = "K-045269"; // 독립목클린캡슐 200mg, 각인 DLB / ACC
+export const TYLENOL = "K-004378"; // 타이레놀정 500mg, 각인 TYLENOL / 500
 export const WHITE_CAPSULES: readonly string[] = [LYRIBEA, DOKRIP];
 
-// OCR이 실제로 읽은 글자 조각 (데이터셋 사진 144장에서 확인). 거꾸로 놓인 각인을 읽은 모양(8MQ, 810 등)도 포함.
-const LYRIBEA_TOKENS = new Set(["PGN", "PG", "PEN", "PCN", "DWB", "OWB", "0WB", "DW8", "8MQ", "8M", "8M3", "BMQ", "SMA"]);
-const DOKRIP_TOKENS = new Set(["ACC", "OLB", "DLB", "0LB", "DL8", "DIB", "810", "81Q", "O0V", "00V"]);
+// OCR이 실제로 읽은 글자 조각 (데이터셋 사진 144장 + 아이패드 후면 사진 76장에서 확인). 거꾸로 놓인 각인을 읽은 모양(8MQ, 810 등)도 포함.
+// "50"은 넣지 않는다: 타이레놀의 "500"을 "50"으로 잘못 읽으면 타이레놀이 리리베아로 바뀐다.
+const IMPRINT_TOKENS: Record<string, ReadonlySet<string>> = {
+  [LYRIBEA]: new Set(["PGN", "PG", "PEN", "PCN", "DWB", "OWB", "0WB", "DW8", "WB", "8MQ", "8M", "8M3", "BMQ", "SMA"]),
+  [DOKRIP]: new Set(["ACC", "OLB", "DLB", "0LB", "DL8", "DIB", "810", "81Q", "O0V", "00V"]),
+  [TYLENOL]: new Set(["TYLENOL", "TYLENO", "YLENOL", "TYLEN", "YLEN"]),
+};
 
-/** OCR 글자 -> 약 코드. 둘 다 보이거나 아무것도 없으면 null (사람이 확인). */
+/** OCR 글자 -> 약 코드. 한 약의 조각만 보일 때만 정하고, 여러 약이 보이거나 아무것도 없으면 null (사람이 확인). */
 export function classifyImprintText(texts: readonly string[]): string | null {
   const tokens = new Set(texts.join(" ").toUpperCase().replace(/[^A-Z0-9]+/g, " ").split(" ").filter(Boolean));
-  const lyribea = [...tokens].some((token) => LYRIBEA_TOKENS.has(token));
-  const dokrip = [...tokens].some((token) => DOKRIP_TOKENS.has(token));
-  if (lyribea === dokrip) return null;
-  return lyribea ? LYRIBEA : DOKRIP;
+  const hits = Object.entries(IMPRINT_TOKENS).filter(([, set]) => [...tokens].some((token) => set.has(token)));
+  return hits.length === 1 ? hits[0]![0] : null;
 }
 
 export interface GrayImage {

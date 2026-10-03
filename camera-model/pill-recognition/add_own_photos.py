@@ -7,7 +7,7 @@ own_photos/<약 코드>/<시각>.jpg + .json (drugCode, box = 프레임 기준 �
 box가 없는 사진(찍을 때 모델이 알약 위치를 못 찾음)은 넣지 않고 개수만 알려 준다.
 
 연속 촬영은 앞뒤 사진이 거의 같아서, 찍은 순서대로 10장씩 묶어 묶음 단위로 나눈다
-(묶음 10개 중 1개는 own_test = 시연 환경 시험용, 1개는 val, 나머지는 train).
+(묶음 5개 중 1개는 own_test = 시연 환경 시험용, 묶음 10개 중 1개는 val, 나머지는 train).
 AI Hub 사진(약 17,000장)보다 훨씬 적으므로 train에는 --repeat번 반복해서 넣는다.
 
 사용법:
@@ -52,7 +52,7 @@ def main():
         counts = {"photos": len(metas), "noBox": len(metas) - len(with_box), "train": 0, "val": 0, "own_test": 0}
         for i, (meta_path, meta) in enumerate(with_box):
             chunk = i // CHUNK
-            split = "own_test" if chunk % 10 == 0 else "val" if chunk % 10 == 5 else "train"
+            split = "own_test" if chunk % 5 == 0 else "val" if chunk % 10 == 3 else "train"
             image = Image.open(meta_path.with_suffix(".jpg")).convert("RGB")
             scale = min(1.0, MAX_SIDE / max(image.size))
             if scale < 1:

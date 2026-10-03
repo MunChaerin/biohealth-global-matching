@@ -33,6 +33,23 @@ describe("PillVerdictTracker", () => {
     expect(tracker.update(STABLE_MS, [amlodipine()])).toMatchObject({ kind: "match", drugCode: "A", confidence: expect.any(Number) });
   });
 
+  it("같이 먹는 약이 둘 이상일 때 1등·2등이 모두 이번 시간 약이면 점수 차이가 0.3 이상일 때만 맞음", () => {
+    const close = { drugCode: "B", confidence: 0.8, second: { drugCode: "A", confidence: 0.6 } }; // 리리베아를 타이레놀로 보는 식
+    const tracker = new PillVerdictTracker(["A", "B"]);
+    for (let t = 0; t <= 3_000; t += 250) expect(tracker.update(t, [close]).kind).not.toBe("match");
+    const clear = { drugCode: "B", confidence: 0.9, second: { drugCode: "A", confidence: 0.5 } };
+    tracker.update(4_000, [clear]);
+    expect(tracker.update(5_000, [clear]).kind).toBe("match");
+    // 2등이 일정 밖의 약이거나, 이번 시간 약이 하나뿐이면 점수 차이를 보지 않는다
+    const other = new PillVerdictTracker(["A", "B"]);
+    const outside = { drugCode: "B", confidence: 0.8, second: { drugCode: "Z", confidence: 0.7 } };
+    other.update(0, [outside]);
+    expect(other.update(1_000, [outside]).kind).toBe("match");
+    const single = new PillVerdictTracker("B");
+    single.update(0, [close]);
+    expect(single.update(1_000, [close]).kind).toBe("match");
+  });
+
   it("일정 밖의 약은 확신이 높아도 다른 약이라고 하지 않고 잘 모르겠어요", () => {
     const tracker = new PillVerdictTracker("A");
     for (let t = 0; t <= 5_000; t += 250) expect(tracker.update(t, [metformin(0.95)]).kind).toBe("unsure");

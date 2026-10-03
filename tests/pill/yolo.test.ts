@@ -53,6 +53,14 @@ describe("decodeYoloOutput", () => {
     expect(decodeYoloOutput(data, dims, classes, box).map((pill) => pill.drugCode)).toEqual(["B"]);
   });
 
+  it("박스마다 두 번째로 높은 약과 점수도 남긴다 (같이 먹는 약끼리 착각 확인용)", () => {
+    const { data, dims } = fakeOutput([[320, 320, 64, 48, 0.55, 0.8, 0.1]]);
+    const [pill] = decodeYoloOutput(data, dims, classes, box);
+    expect(pill?.drugCode).toBe("B");
+    expect(pill?.second?.drugCode).toBe("A");
+    expect(pill?.second?.confidence).toBeCloseTo(0.55, 5);
+  });
+
   it("모델 클래스 수와 메타데이터 클래스 수가 다르면 오류", () => {
     const { data, dims } = fakeOutput([[320, 320, 60, 60, 0.8, 0.1]]);
     expect(() => decodeYoloOutput(data, dims, classes, box)).toThrow(/클래스 수/);

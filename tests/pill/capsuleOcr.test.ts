@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { DOKRIP, LYRIBEA, classifyImprintText, prepareImprint, rotate180, type GrayImage } from "../../lib/pill/capsuleOcr";
+import { DOKRIP, LYRIBEA, TYLENOL, classifyImprintText, prepareImprint, rotate180, type GrayImage } from "../../lib/pill/capsuleOcr";
 
 describe("classifyImprintText", () => {
   it("각인 조각으로 리리베아 / 독립목클린을 정한다 (거꾸로 읽힌 모양 포함)", () => {
     expect(classifyImprintText(["OB PGN", ""])).toBe(LYRIBEA);
     expect(classifyImprintText(["I84 8MQ", "NN"])).toBe(LYRIBEA); // DWB가 거꾸로 읽힘
     expect(classifyImprintText(["OLB ACC", "O0V 810"])).toBe(DOKRIP);
+    expect(classifyImprintText(["TYLENOL", ""])).toBe(TYLENOL);
+  });
+
+  it("'50'만으로는 리리베아로 정하지 않는다 (타이레놀 500을 50으로 잘못 읽는 경우)", () => {
+    expect(classifyImprintText(["50", ""])).toBeNull();
+    expect(classifyImprintText(["TYLENOL", "DWB"])).toBeNull(); // 두 약이 같이 보이면 못 정함
   });
 
   it("아무것도 없거나 둘 다 보이면 못 정한다 (사람이 확인)", () => {

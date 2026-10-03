@@ -8,7 +8,7 @@ import { describeDetections, detectWithZoom } from "../../lib/pill/zoom";
 import { pillName } from "../../lib/pill/catalog";
 import { CONFIDENT, PillVerdictTracker, STABLE_MS, pillsInFrame, type PillDetection, type PillVerdict } from "../../lib/pill/verdict";
 import type { IntakeMethod } from "../../lib/medication/intakeStore";
-import { WHITE_CAPSULES, cropGray, readCapsuleImprint } from "../../lib/pill/capsuleOcr";
+import { LYRIBEA, WHITE_CAPSULES, cropGray, readCapsuleImprint } from "../../lib/pill/capsuleOcr";
 
 const DETECT_INTERVAL_MS = 250;
 const LOG_INTERVAL_MS = 1_000; // 개발 중 콘솔에 인식 결과를 찍는 간격
@@ -101,6 +101,8 @@ export function usePillCheck(options: {
   const askRef = useRef<{ since: number | null; frames: number; otherSince: number | null; state: "idle" | "busy" | "done" }>({ ...ASK_IDLE });
   // 지금 보여 주는 근거 사진의 약 (같은 약이면 다시 찍지 않음, 사람이 확인한 경우 질문 때 사진을 유지)
   const evidenceCodeRef = useRef<string | null>(null);
+  // 이번 시간 약에 리리베아가 남아 있을 때, 다른 약으로 확정하기 전 각인 확인 (약을 내려놓을 때까지 한 번)
+  const gateRef = useRef<{ state: "idle" | "busy" | "done"; result: string | null }>({ state: "idle", result: null });
   const [ask, setAsk] = useState<PillAsk | null>(null);
   const takenKey = takenCodes.join(",");
   const expectedKey = medications.map((item) => item.drugCode).join(",");
@@ -167,7 +169,53 @@ export function usePillCheck(options: {
           console.error("pill detection error", error);
         }
         if (cancelled) return;
-        const reading = tracker.update(performance.now(), detections);
+        let reading = tracker.update(performance.now(), detections);
+
+        // 같이 먹는 약 착각 방지: 리리베아가 남아 있는데 모델이 다른 약(예: 타이레놀)으로 확정하려 하면 각인을 한 번 읽는다.
+        // 리리베아 각인이 읽히면 리리베아로 바로잡고, 모델이 본 약의 각인이 읽히면 그대로 확정하고,
+        // 그 밖(못 읽음 포함)은 사진을 보여 주고 사람에게 묻는다. 아이패드 후면 사진에서는 OCR이 각인을 거의 못 읽어서
+        // "못 읽으면 모델 판정"으로 두면 리리베아 앞면을 타이레놀로 기록하는 위험이 그대로 남는다 (모델의 2등 점수도 거의 0이라 점수 차이로는 못 막음).
+        const gate = gateRef.current;
+        const lyribeaLeft = medicationsRef.current.some((item) => item.drugCode === LYRIBEA);
+        if (reading.kind === "match" && reading.drugCode !== LYRIBEA && lyribeaLeft && heldRef.current?.drugCode !== reading.drugCode) {
+          if (gate.state === "idle" && reading.box) {
+            gate.state = "busy";
+            setAsk({ kind: "reading" });
+            const seen: PillDetection = { drugCode: reading.drugCode, confidence: reading.confidence ?? 0, box: reading.box };
+            const crop = cropGray(frame, reading.box);
+            const image = cropEvidence(frame, reading.box);
+            (crop ? readCapsuleImprint(crop) : Promise.resolve({ drugCode: null, texts: [] as string[] }))
+              .then((result) => {
+                if (cancelled) return;
+                console.info(`[알약 인식] ${pillName(seen.drugCode, "ko")} 확정 전 각인 확인: ${JSON.stringify(result.texts)} -> ${result.drugCode ? pillName(result.drugCode, "ko") : "못 읽음 (사람 확인)"}`);
+                gate.state = "done";
+                gate.result = result.drugCode;
+                if (result.drugCode === LYRIBEA) {
+                  heldRef.current = { kind: "match", drugCode: LYRIBEA, box: seen.box, byOcr: true };
+                  setAsk(null);
+                } else if (result.drugCode === seen.drugCode) {
+                  setAsk(null); // 모델이 본 약의 각인이 읽힘 -> 그대로 확정
+                } else {
+                  askPerson(seen, image);
+                }
+              })
+              .catch((error) => {
+                if (cancelled) return;
+                console.error("imprint check error", error);
+                gate.state = "done";
+                gate.result = null;
+                askPerson(seen, image);
+              });
+          }
+          // 각인 확인에서 모델이 본 약의 각인이 읽혔을 때만 모델 판정대로 (그 밖은 바로잡거나 사람 확인)
+          if (!(gate.state === "done" && gate.result === reading.drugCode)) {
+            reading = { kind: "checking", drugCode: reading.drugCode };
+          }
+        } else if (reading.kind === "noPill" && gate.state === "done") {
+          gate.state = "idle"; // 내려놓았다가 다시 비추면 다시 확인
+          gate.result = null;
+        }
+
         if (reading.kind === "match") heldRef.current = reading;
         else if (reading.kind === "mismatch") heldRef.current = null;
         else if (reading.kind === "noPill" && heldRef.current?.kind === "mismatch") heldRef.current = null;
@@ -311,6 +359,7 @@ export function usePillCheck(options: {
     trackerRef.current?.setExpected(expectedKey ? expectedKey.split(",") : []);
     heldRef.current = null;
     askRef.current = { ...ASK_IDLE };
+    gateRef.current = { state: "idle", result: null };
     setEvidence(null);
     setAsk(null);
   }, [expectedKey]);

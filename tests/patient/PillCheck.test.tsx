@@ -63,6 +63,7 @@ describe("알약 확인 모드", () => {
   beforeEach(() => {
     window.localStorage.clear();
     resetRearCameraMemory();
+    ocr.drugCode = null;
     vi.stubGlobal("fetch", vi.fn(async (url: string) => (url.includes("model-metadata") ? new Response("", { status: 404 }) : new Response("{}"))));
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     // jsdom에는 실제 영상이 없으므로 영상이 준비된 것처럼 만든다
@@ -91,6 +92,7 @@ describe("알약 확인 모드", () => {
   }
 
   it("같은 시간의 2알을 한 알씩: 맞는 약은 [먹었어요]를 눌러야 기록하고, 남은 약을 이어서 확인한다", async () => {
+    ocr.drugCode = tylenol.drugCode; // 리리베아가 남아 있는 동안 타이레놀은 각인 확인을 거친다
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();
     const { onTaken } = renderPillCheck();
@@ -132,6 +134,7 @@ describe("알약 확인 모드", () => {
   });
 
   it("맞는 약으로 한 번 판정되면 약이 안 보이거나 애매해져도 [먹었어요]를 유지하고, 다른 약이 확실히 보이면 없앤다", async () => {
+    ocr.drugCode = tylenol.drugCode; // 리리베아가 남아 있는 동안 타이레놀은 각인 확인을 거친다
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();
     renderPillCheck();
@@ -148,6 +151,58 @@ describe("알약 확인 모드", () => {
     await showPill("다른 약");
     await waitFor(() => expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument());
     expect(screen.queryByText(/무스판정/)).not.toBeInTheDocument(); // 일정 밖의 약 이름은 말하지 않음
+  });
+
+  describe("같이 먹는 약 착각 방지 (아침: 리리베아 + 타이레놀)", () => {
+    it("모델이 타이레놀로 봐도 리리베아 각인(DWB PGN 50)이 읽히면 리리베아로 바로잡고, 타이레놀 '맞아요'를 내지 않는다", async () => {
+      ocr.drugCode = lyribea.drugCode;
+      window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+      mockCamera();
+      renderPillCheck();
+      await screen.findByRole("button", { name: "타이레놀정 500mg" });
+      await showPill("타이레놀정 500mg");
+      expect(await screen.findByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
+      expect(screen.queryByText(/맞아요! 타이레놀/)).not.toBeInTheDocument();
+      expect(readCapsuleImprint).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole("button", { name: "먹었어요" }));
+      await waitFor(() => expect(medicationPosts("taken")).toEqual([{ patientId: "tanaka-haruko", medicationId: lyribea.id, event: "taken", method: "camera" }]));
+    });
+
+    it("각인을 못 읽으면 타이레놀로 확정하지 않고 사진으로 사람에게 묻는다", async () => {
+      ocr.drugCode = null;
+      window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+      mockCamera();
+      renderPillCheck();
+      await screen.findByRole("button", { name: "타이레놀정 500mg" });
+      await showPill("타이레놀정 500mg");
+      expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+      expect(screen.queryByText(/맞아요! 타이레놀/)).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
+    });
+
+    it("타이레놀 각인이 읽히면 타이레놀로 확정한다", async () => {
+      ocr.drugCode = tylenol.drugCode;
+      window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+      mockCamera();
+      renderPillCheck();
+      await screen.findByRole("button", { name: "타이레놀정 500mg" });
+      await showPill("타이레놀정 500mg");
+      expect(await screen.findByText(/맞아요! 타이레놀정 500mg이에요/)).toBeInTheDocument();
+    });
+
+    it("리리베아를 먹고 나면(남은 약이 타이레놀뿐) 각인 확인 없이 판정한다", async () => {
+      window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+      mockCamera();
+      renderPillCheck();
+      await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
+      await showPill("리리베아캡슐 50mg");
+      fireEvent.click(await screen.findByRole("button", { name: "먹었어요" }));
+      await screen.findByText(/복용을 기록했어요/);
+      vi.mocked(readCapsuleImprint).mockClear();
+      await showPill("타이레놀정 500mg");
+      expect(await screen.findByText(/맞아요! 타이레놀정 500mg이에요/)).toBeInTheDocument();
+      expect(readCapsuleImprint).not.toHaveBeenCalled();
+    });
   });
 
   describe("흰 캡슐 (모델이 리리베아로 보지만 기준 0.75에 못 미침)", () => {
