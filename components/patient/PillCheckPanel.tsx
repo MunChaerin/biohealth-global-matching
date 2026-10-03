@@ -6,6 +6,8 @@ import type { MedicationItem } from "../../lib/medication/schedule";
 import { pillImprint, pillName, withParticle } from "../../lib/pill/catalog";
 import type { PillDetection, PillVerdict } from "../../lib/pill/verdict";
 import type { IntakeMethod } from "../../lib/medication/intakeStore";
+import { LYRIBEA } from "../../lib/pill/capsuleOcr";
+import type { DistanceHint } from "../../lib/pill/zoom";
 import type { PillAsk, PillCheckPhase } from "./usePillCheck";
 import styles from "./patient-chat.module.css";
 
@@ -25,6 +27,7 @@ interface Props {
   speak?: (text: string) => void; // 음성 안내 (환자 화면의 음성 기능)
   ask?: PillAsk | null; // 모델이 애매할 때: 각인 읽는 중 / 확대 사진을 보여 주고 묻는 중
   onAnswer?: (drugCode: string | null) => void; // 고른 약 (null = 아니에요)
+  distance?: DistanceHint | null; // 알약이 너무 가깝다 / 멀다
 }
 
 const REPEAT_HINT_MS = 6_000; // "한 알씩", "잘 모르겠어요" 같은 안내를 다시 읽어주기까지 최소 간격
@@ -35,7 +38,7 @@ export const MANUAL_OFFER_MS = 8_000; // 이만큼 계속 알아보지 못하면
  * 맞는 약일 때만 [먹었어요]를 누를 수 있고, 눌러야 복용으로 기록된다. 안내는 화면 문구와 음성으로 함께 준다.
  * 모델·카메라를 쓸 수 없거나 한참 동안 약을 알아보지 못하면 카메라 없이 직접 기록할 수 있다 (의료진 화면에 "직접 기록"으로 표시).
  */
-export function PillCheckPanel({ language, group, takenIds, phase, verdict, cameraProblem, needsCameraConsent, onAllowCamera, onTaken, onClose, debugShow, evidence, speak, ask, onAnswer }: Props) {
+export function PillCheckPanel({ language, group, takenIds, phase, verdict, cameraProblem, needsCameraConsent, onAllowCamera, onTaken, onClose, debugShow, evidence, speak, ask, onAnswer, distance }: Props) {
   const ja = language === "ja";
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -46,7 +49,10 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
   const label = (item: MedicationItem) => (ja ? item.japaneseName : item.name);
   const dose = (item: MedicationItem) => (ja ? item.japaneseDose : item.dose);
   const appearance = (item: MedicationItem) => (ja ? item.japaneseAppearance : item.appearance);
-  const remaining = group.filter((item) => !takenIds.includes(item.id));
+  // 리리베아가 남아 있으면 리리베아부터 비추게 한다: 리리베아를 먹고 나면 타이레놀은 각인 확인·사람 확인 없이 판정된다
+  // (리리베아가 남아 있는 동안 타이레놀로 판정되면 리리베아를 잘못 본 것일 수 있어 각인을 확인하는데, 아이패드에서는 거의 못 읽음)
+  const remaining = group.filter((item) => !takenIds.includes(item.id)).sort((a, b) => Number(b.drugCode === LYRIBEA) - Number(a.drugCode === LYRIBEA));
+  const firstPill = remaining.length > 1 && remaining[0]!.drugCode === LYRIBEA ? remaining[0]! : null;
   const takenCodes = group.filter((item) => takenIds.includes(item.id)).map((item) => item.drugCode);
   const allDone = remaining.length === 0;
   const matched = verdict.kind === "match" ? remaining.find((item) => item.drugCode === verdict.drugCode) : undefined;
@@ -129,15 +135,25 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
     speechKey = `ask:${ask.candidates.join(",")}`;
   } else if (ask?.kind === "reading" && verdict.kind !== "match" && verdict.kind !== "mismatch") {
     status = ja ? "お薬に刻まれた文字を確認しています…" : "약에 새겨진 글자를 확인하고 있어요…";
+  } else if (distance && (verdict.kind === "unsure" || verdict.kind === "checking")) {
+    // 가까이 대면 후면 카메라 초점이 안 맞고 학습 때보다 크게 보여서 못 알아본다
+    status =
+      distance === "tooClose"
+        ? ja ? "近すぎます。カメラから20〜30cmほど離してください。" : "너무 가까워요. 카메라에서 20~30cm 정도 떼 주세요."
+        : ja ? "もう少しカメラに近づけてください。" : "조금 더 가까이 비춰 주세요.";
+    speechKey = `distance:${distance}`;
   } else {
     switch (verdict.kind) {
       case "noPill": {
-        status = ja ? `お薬を1錠だけ、画面の真ん中の四角の中に近づけて見せてください。` : `약을 한 알만 화면 가운데 네모 안에 가까이 비춰 주세요.`;
+        const first = firstPill ? (ja ? `まず${label(firstPill)}から` : `${label(firstPill)}부터 `) : "";
+        status = ja
+          ? `${first}お薬を1錠だけ、カメラから20〜30cm離して、画面の真ん中の四角の中に見せてください。`
+          : `${first ? `먼저 ${first}` : ""}약을 한 알만, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.`;
         const list = remaining.map((item) => `${label(item)} ${dose(item)}`).join(ja ? "、" : ", ");
         speechKey = "start";
         speechText = ja
-          ? `今は${list}を飲む時間です。1錠ずつ、画面の真ん中の四角の中に見せてください。`
-          : `지금은 ${list} 드실 시간이에요. 한 알씩 화면 가운데 네모 안에 비춰 주세요.`;
+          ? `今は${list}を飲む時間です。${first}1錠ずつ、カメラから20〜30cm離して、画面の真ん中の四角の中に見せてください。`
+          : `지금은 ${list} 드실 시간이에요. ${first ? `먼저 ${first}` : ""}한 알씩, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.`;
         break;
       }
       case "multiple":
@@ -148,8 +164,8 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
       case "unsure":
         // 글자 없는 면(예: 캡슐 뒷면)만 보이면 비슷한 약과 구분이 안 되므로 각인이 보이게 돌려 달라고 한다
         status = ja
-          ? "どのお薬かよく分かりません。お薬に刻まれた文字がカメラに見えるように向きを変えて、近づけて見せてください。"
-          : "어떤 약인지 잘 모르겠어요. 약에 새겨진 글자가 카메라 쪽으로 보이게 돌려서, 가까이 비춰 주세요.";
+          ? "どのお薬かよく分かりません。お薬に刻まれた文字がカメラに見えるように向きを変えて、20〜30cm離して見せてください。"
+          : "어떤 약인지 잘 모르겠어요. 약에 새겨진 글자가 카메라 쪽으로 보이게 돌려서, 20~30cm 떨어뜨려 비춰 주세요.";
         speechKey = "unsure";
         break;
       case "checking":
@@ -187,7 +203,7 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
     const spoken = spokenRef.current;
     if (speechKey === spoken.last) return;
     if (speechKey === "start" && spoken.keys.has("start")) return;
-    if ((speechKey === "multiple" || speechKey === "unsure") && Date.now() - spoken.lastAt < REPEAT_HINT_MS) return;
+    if ((speechKey === "multiple" || speechKey === "unsure" || speechKey.startsWith("distance:")) && Date.now() - spoken.lastAt < REPEAT_HINT_MS) return;
     spoken.keys.add(speechKey);
     spoken.last = speechKey;
     spoken.lastAt = Date.now();

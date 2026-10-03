@@ -210,6 +210,7 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
           debugShow={pillCheck.debug ? pill.debugShow : undefined}
           evidence={pill.evidence}
           ask={pill.ask}
+          distance={pill.distance}
           onAnswer={pill.answerAsk}
           speak={pillCheck.speak}
         />

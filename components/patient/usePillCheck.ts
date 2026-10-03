@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
 import type { MedicationItem } from "../../lib/medication/schedule";
 import { DebugPillRecognizer, loadPillRecognizer, type PillRecognizer } from "../../lib/pill/recognizer";
 import type { PillRecognitionResult } from "../../lib/pill/result";
-import { describeDetections, detectWithZoom } from "../../lib/pill/zoom";
+import { describeDetections, detectWithZoom, distanceHint, type DistanceHint } from "../../lib/pill/zoom";
 import { pillName } from "../../lib/pill/catalog";
 import { CONFIDENT, PillVerdictTracker, STABLE_MS, pillsInFrame, type PillDetection, type PillVerdict } from "../../lib/pill/verdict";
 import type { IntakeMethod } from "../../lib/medication/intakeStore";
@@ -104,6 +104,7 @@ export function usePillCheck(options: {
   // 이번 시간 약에 리리베아가 남아 있을 때, 다른 약으로 확정하기 전 각인 확인 (약을 내려놓을 때까지 한 번)
   const gateRef = useRef<{ state: "idle" | "busy" | "done"; result: string | null }>({ state: "idle", result: null });
   const [ask, setAsk] = useState<PillAsk | null>(null);
+  const [distance, setDistance] = useState<DistanceHint | null>(null); // 알약이 너무 가깝다 / 멀다
   const takenKey = takenCodes.join(",");
   const expectedKey = medications.map((item) => item.drugCode).join(",");
   const hasMedications = medications.length > 0;
@@ -161,6 +162,7 @@ export function usePillCheck(options: {
         try {
           const result = await detectWithZoom(recognizer, frame);
           detections = result.detections;
+          setDistance(distanceHint(result.size));
           if (process.env.NODE_ENV !== "production" && !debug && performance.now() - loggedAt > LOG_INTERVAL_MS) {
             loggedAt = performance.now();
             console.debug(`[알약 인식] ${describeDetections(result, (code) => pillName(code, "ko"))}`);
@@ -391,5 +393,5 @@ export function usePillCheck(options: {
     if (debugRecognizerRef.current) debugRecognizerRef.current.current = detections;
   }
 
-  return { phase, verdict, evidence, ask, answerAsk, confirmTaken, debugShow };
+  return { phase, verdict, evidence, ask, answerAsk, distance, confirmTaken, debugShow };
 }

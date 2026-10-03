@@ -31,7 +31,8 @@ describe("PillCheckPanel - 같은 시간에 2알을 한 알씩", () => {
   it("시작 안내에 이번에 먹을 약을 모두 말하고, 어느 약이든 먼저 비추면 맞음", () => {
     const speak = vi.fn();
     const { rerender } = render(panel({ kind: "noPill" }, { speak }));
-    expect(speak).toHaveBeenLastCalledWith("지금은 리리베아캡슐 50mg 1캡슐, 타이레놀정 500mg 1알 드실 시간이에요. 한 알씩 화면 가운데 네모 안에 비춰 주세요.");
+    expect(speak).toHaveBeenLastCalledWith("지금은 리리베아캡슐 50mg 1캡슐, 타이레놀정 500mg 1알 드실 시간이에요. 먼저 리리베아캡슐 50mg부터 한 알씩, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.");
+    expect(screen.getByText("먼저 리리베아캡슐 50mg부터 약을 한 알만, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.")).toBeInTheDocument();
 
     rerender(panel({ kind: "match", drugCode: tylenol.drugCode, box }, { speak }));
     expect(speak).toHaveBeenLastCalledWith("맞아요! 타이레놀정 500mg이에요. 드신 뒤 [먹었어요]를 눌러 주세요.");
@@ -75,6 +76,22 @@ describe("PillCheckPanel - 같은 시간에 2알을 한 알씩", () => {
     rerender(panel({ kind: "match", drugCode: lyribea.drugCode, box }, { speak, language: "ja" }));
     expect(speak).toHaveBeenCalledTimes(1);
     expect(speak).toHaveBeenLastCalledWith(expect.stringContaining("合っています！リリベアカプセル50mgです。"));
+  });
+});
+
+describe("PillCheckPanel 거리 안내", () => {
+  it("알약이 너무 크게 보이면 멀리 떼라고, 너무 작으면 가까이 하라고 안내한다", () => {
+    const { rerender } = render(panel({ kind: "unsure" }, { distance: "tooClose" }));
+    expect(screen.getByText("너무 가까워요. 카메라에서 20~30cm 정도 떼 주세요.")).toBeInTheDocument();
+    rerender(panel({ kind: "checking", drugCode: lyribea.drugCode }, { distance: "tooFar" }));
+    expect(screen.getByText("조금 더 가까이 비춰 주세요.")).toBeInTheDocument();
+    rerender(panel({ kind: "match", drugCode: lyribea.drugCode, box }, { distance: "tooClose" })); // 판정이 나면 판정 안내가 먼저
+    expect(screen.getByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
+  });
+
+  it("타이레놀만 남으면 '먼저 …부터' 없이 안내한다", () => {
+    render(panel({ kind: "noPill" }, { takenIds: [lyribea.id] }));
+    expect(screen.getByText("약을 한 알만, 카메라에서 20~30cm 떨어뜨려 화면 가운데 네모 안에 비춰 주세요.")).toBeInTheDocument();
   });
 });
 
