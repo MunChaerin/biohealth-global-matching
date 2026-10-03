@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   const patientId = new URL(request.url).searchParams.get("patientId");
   const denied = demoGuard(patientId);
   if (denied) return denied;
-  return NextResponse.json(getTodayMedication(patientId!));
+  return NextResponse.json(await getTodayMedication(patientId!));
 }
 
 interface MedicationEventBody {
@@ -48,10 +48,10 @@ export async function POST(request: Request) {
 
   // 의료진 화면: 복용 시간별 약 확인 자동 열림 시각 변경
   if (body.event === "reminder") {
-    if (typeof body.time !== "string" || typeof body.openAt !== "string" || !setReminder(patientId!, body.time, body.openAt)) {
+    if (typeof body.time !== "string" || typeof body.openAt !== "string" || !(await setReminder(patientId!, body.time, body.openAt))) {
       return NextResponse.json({ error: "time은 이 환자의 복용 시간, openAt은 HH:MM이어야 합니다." }, { status: 400 });
     }
-    return NextResponse.json(getTodayMedication(patientId!));
+    return NextResponse.json(await getTodayMedication(patientId!));
   }
 
   if (typeof body.medicationId !== "string" || !findMedication(patientId!, body.medicationId)) {
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     if (method !== "camera" && method !== "confirmed" && method !== "manual") {
       return NextResponse.json({ error: "method는 camera, confirmed, manual 중 하나여야 합니다." }, { status: 400 });
     }
-    recordTaken(patientId!, body.medicationId, method);
+    await recordTaken(patientId!, body.medicationId, method);
   } else if (body.event === "recognition") {
     try {
       validateRecognitionResult(body.result);
@@ -73,10 +73,10 @@ export async function POST(request: Request) {
     if (body.result.patientId !== patientId) {
       return NextResponse.json({ error: "result.patientId가 patientId와 다릅니다." }, { status: 400 });
     }
-    recordRecognition(patientId!, body.medicationId, body.result);
+    await recordRecognition(patientId!, body.medicationId, body.result);
   } else {
     return NextResponse.json({ error: "event는 taken, recognition, reminder 중 하나여야 합니다." }, { status: 400 });
   }
 
-  return NextResponse.json(getTodayMedication(patientId!));
+  return NextResponse.json(await getTodayMedication(patientId!));
 }

@@ -1,8 +1,9 @@
 import type { PillRecognitionResult } from "../pill/result";
 import { getReminders, type MedicationReminder } from "./reminderStore";
 import { getMedicationSchedule, type MedicationItem } from "./schedule";
+import { assertSupabaseResult, getSupabaseAdmin, isSupabaseConfigured, requireProductionStorage } from "../supabase/server";
 
-// 오늘 복약 기록. 지금은 서버 메모리 (카메라 결과처럼 데모용 - 서버 재시작 시 사라짐).
+// 오늘 복약 기록. 로컬에서는 메모리를, 배포 환경에서는 Supabase를 사용한다.
 // 날짜는 한국·일본 시간(UTC+9) 기준으로 나눈다.
 
 // camera: 모델이 맞는 약으로 판정한 뒤 기록 / confirmed: 모델이 애매해서 확대 사진을 보고 환자가 [맞아요]로 정한 뒤 기록
@@ -47,35 +48,54 @@ function dayRecords(patientId: string, date: string): Map<string, IntakeRecord> 
   return records;
 }
 
-export function getTodayMedication(patientId: string, now: Date = new Date()): TodayMedication {
+async function loadDayRecords(patientId: string, date: string): Promise<Map<string, IntakeRecord>> {
+  requireProductionStorage();
+  if (!isSupabaseConfigured()) return dayRecords(patientId, date);
+  const { data, error } = await getSupabaseAdmin().from("medication_intakes").select("medication_id, record").eq("patient_id", patientId).eq("intake_date", date);
+  assertSupabaseResult(error);
+  return new Map((data ?? []).map((item) => [item.medication_id, item.record as IntakeRecord]));
+}
+
+async function saveRecord(patientId: string, date: string, medicationId: string, record: IntakeRecord): Promise<void> {
+  if (!isSupabaseConfigured()) {
+    dayRecords(patientId, date).set(medicationId, record);
+    return;
+  }
+  const { error } = await getSupabaseAdmin().from("medication_intakes").upsert({ patient_id: patientId, intake_date: date, medication_id: medicationId, record, updated_at: new Date().toISOString() });
+  assertSupabaseResult(error);
+}
+
+export async function getTodayMedication(patientId: string, now: Date = new Date()): Promise<TodayMedication> {
   const date = dateKey(now);
-  const records = dayRecords(patientId, date);
+  const records = await loadDayRecords(patientId, date);
   const items: MedicationStatus[] = getMedicationSchedule(patientId).map((item) => {
     const record = records.get(item.id) ?? { mismatchCount: 0 };
     return { ...item, ...record, status: record.takenAt ? "taken" : "pending" };
   });
   const next = items.find((item) => item.status === "pending") ?? null;
   const nextGroup = next ? items.filter((item) => item.status === "pending" && item.time === next.time) : [];
-  return { date, items, next, nextGroup, reminders: getReminders(patientId) };
+  return { date, items, next, nextGroup, reminders: await getReminders(patientId) };
 }
 
 /** [먹었어요]. 이미 기록돼 있으면 처음 시각을 유지한다. 인식만으로는 기록하지 않는다. */
-export function recordTaken(patientId: string, medicationId: string, method: IntakeMethod = "camera", now: Date = new Date()): void {
-  const records = dayRecords(patientId, dateKey(now));
+export async function recordTaken(patientId: string, medicationId: string, method: IntakeMethod = "camera", now: Date = new Date()): Promise<void> {
+  const date = dateKey(now);
+  const records = await loadDayRecords(patientId, date);
   const record = records.get(medicationId) ?? { mismatchCount: 0 };
-  if (!record.takenAt) records.set(medicationId, { ...record, takenAt: now.toISOString(), method });
+  if (!record.takenAt) await saveRecord(patientId, date, medicationId, { ...record, takenAt: now.toISOString(), method });
 }
 
 /** 알약 인식 결과(사진 없음). 다른 약(mismatched)이면 의료진 화면에 보이도록 횟수와 마지막 약을 센다. */
-export function recordRecognition(patientId: string, medicationId: string, result: PillRecognitionResult, now: Date = new Date()): void {
-  const records = dayRecords(patientId, dateKey(now));
+export async function recordRecognition(patientId: string, medicationId: string, result: PillRecognitionResult, now: Date = new Date()): Promise<void> {
+  const date = dateKey(now);
+  const records = await loadDayRecords(patientId, date);
   const record = records.get(medicationId) ?? { mismatchCount: 0 };
   const next: IntakeRecord = { ...record, lastRecognition: result };
   if (result.status === "mismatched" && result.medicationCode) {
     next.mismatchCount = record.mismatchCount + 1;
     next.lastMismatch = { detectedDrugCode: result.medicationCode, at: result.measuredAt };
   }
-  records.set(medicationId, next);
+  await saveRecord(patientId, date, medicationId, next);
 }
 
 export function clearMedicationIntakes(): void {

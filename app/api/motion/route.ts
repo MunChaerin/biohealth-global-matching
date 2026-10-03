@@ -35,7 +35,7 @@ export async function GET(request: Request) {
   const patientId = new URL(request.url).searchParams.get("patientId");
   const denied = guard(patientId);
   if (denied) return denied;
-  return NextResponse.json({ report: getMotionReport(patientId!) });
+  return NextResponse.json({ report: await getMotionReport(patientId!) });
 }
 
 export async function POST(request: Request) {
@@ -45,6 +45,6 @@ export async function POST(request: Request) {
   const report = body as MotionReport;
   const denied = guard(report.patientId);
   if (denied) return denied;
-  saveMotionReport(report);
+  await saveMotionReport(report);
   return NextResponse.json({ ok: true });
 }

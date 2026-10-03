@@ -293,8 +293,8 @@ AI가 생성한 평가와 치료 계획은 의료진의 검토와 최종 판단�
 Node.js 의존성을 설치한 뒤 개발 서버를 실행합니다.
 
 ```bash
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
 실제 OpenAI API를 사용하려면 프로젝트 루트에 `.env.local` 파일을 만들고 서버 환경변수를 설정합니다.
@@ -329,12 +329,14 @@ curl -X POST http://localhost:3000/api/chat \
 ### 검증 명령어
 
 ```bash
-pnpm typecheck
-pnpm test
-pnpm build
+npm run typecheck
+npm test
+npm run build
 ```
 
 OpenAI API가 연결되지 않은 상황에서도 `MockChatbotProvider`를 사용하여 챗봇 흐름과 안전 분기를 테스트할 수 있습니다.
+
+Supabase와 Vercel을 이용한 원격 데모 배포 절차는 [배포 가이드](docs/vercel-supabase-deployment.md)를 참고합니다.
 
 ---
 
