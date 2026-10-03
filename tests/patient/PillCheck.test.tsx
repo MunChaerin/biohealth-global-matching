@@ -168,14 +168,15 @@ describe("알약 확인 모드", () => {
       await waitFor(() => expect(medicationPosts("taken")).toEqual([{ patientId: "tanaka-haruko", medicationId: lyribea.id, event: "taken", method: "camera" }]));
     });
 
-    it("각인을 못 읽으면 타이레놀로 확정하지 않고 사진으로 사람에게 묻는다", async () => {
+    it("각인을 못 읽으면 타이레놀로 확정하지 않고 '잘 모르겠어요'로 둔다 (어르신에게 고르게 하지 않음)", async () => {
       ocr.drugCode = null;
       window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
       mockCamera();
       renderPillCheck();
       await screen.findByRole("button", { name: "타이레놀정 500mg" });
       await showPill("타이레놀정 500mg");
-      expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+      expect(await screen.findByText(/어떤 약인지 잘 모르겠어요/)).toBeInTheDocument();
+      expect(screen.queryByText(/골라 주세요/)).not.toBeInTheDocument();
       expect(screen.queryByText(/맞아요! 타이레놀/)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
     });
@@ -225,56 +226,31 @@ describe("알약 확인 모드", () => {
       expect(readCapsuleImprint).toHaveBeenCalledTimes(1); // 매 프레임 읽지 않음
     });
 
-    it("일정 밖의 약(독립목클린) 각인이어도 '다른 약'이라 하지 않고 사진으로 묻는다", async () => {
+    it("일정 밖의 약(독립목클린) 각인이어도 '다른 약'이라 하지 않고 '잘 모르겠어요'", async () => {
       ocr.drugCode = "K-045269";
       await showWhiteCapsule();
-      expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+      expect(await screen.findByText(/어떤 약인지 잘 모르겠어요/)).toBeInTheDocument();
       expect(screen.queryByText(/독립목클린/)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
     });
 
-    it("각인으로 못 정하면 사진을 보여 주고 고르게 하고, 고른 약은 사진 확인(confirmed)으로 기록", async () => {
+    it("각인으로 못 정하면 고르게 하지 않고 다시 비춰 달라고 한다", async () => {
       ocr.drugCode = null;
       await showWhiteCapsule();
-      expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: /리리베아캡슐 50mg각인/ })); // 개발용 버튼과 구분
-      expect(await screen.findByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "먹었어요" }));
-      await waitFor(() => expect(medicationPosts("taken")).toEqual([{ patientId: "tanaka-haruko", medicationId: lyribea.id, event: "taken", method: "confirmed" }]));
-      // 사람이 정한 것은 모델 판정(matched)으로 보내지 않는다
-      expect(medicationPosts("recognition").some((body) => body.result.status === "matched")).toBe(false);
+      expect(await screen.findByText(/어떤 약인지 잘 모르겠어요/)).toBeInTheDocument();
+      expect(screen.queryByText(/골라 주세요/)).not.toBeInTheDocument();
+      expect(readCapsuleImprint).toHaveBeenCalledTimes(1);
     });
   });
 
-  it("사진을 보고 고른 뒤 근거 사진은 질문 때 사진 그대로 (버튼 누른 뒤 화면으로 덮어쓰지 않음)", async () => {
-    let shot = 0;
-    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(() => `data:image/jpeg;base64,SHOT${(shot += 1)}`);
-    // jsdom에는 캔버스 그리기가 없으므로 근거 사진용(옵션 없는 getContext)만 흉내 낸다
-    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(((_type: string, options?: unknown) =>
-      options ? null : { drawImage: vi.fn() }) as unknown as typeof HTMLCanvasElement.prototype.getContext);
-    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
-    mockCamera();
-    renderPillCheck();
-    await screen.findByRole("button", { name: "다른 약" });
-    await showPill("다른 약");
-    expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
-    const asked = screen.getByAltText("카메라로 본 약").getAttribute("src");
-    fireEvent.click(screen.getByRole("button", { name: /타이레놀정 500mg각인/ }));
-    expect(await screen.findByText(/맞아요! 타이레놀정 500mg이에요/)).toBeInTheDocument();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 600));
-    });
-    expect(screen.getByAltText("카메라로 본 약")).toHaveAttribute("src", asked!);
-  });
-
-  it("일정 밖의 약은 '다른 약'이라 하지 않고 사진으로 묻고, 의료진 기록은 unknown 한 번만", async () => {
+  it("일정 밖의 약은 '다른 약'이라 하지 않고 '잘 모르겠어요', 의료진 기록은 unknown 한 번만", async () => {
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();
     renderPillCheck();
     await screen.findByRole("button", { name: "다른 약" });
 
     await showPill("다른 약");
-    expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+    expect(await screen.findByText(/어떤 약인지 잘 모르겠어요/)).toBeInTheDocument();
     expect(screen.queryByText(/무스판정/)).not.toBeInTheDocument();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
@@ -299,20 +275,25 @@ describe("알약 확인 모드", () => {
     expect(await screen.findByText(/잘 모르겠어요/)).toBeInTheDocument();
   });
 
-  it("표정 카메라에 동의하지 않았으면 약 확인용 카메라를 처음 한 번만 묻고, 다음부터는 바로 켠다", async () => {
+  it("들어오자마자 카메라 권한을 받아 두어, 약 확인이 열리면 [카메라 켜고 확인하기] 없이 바로 켠다", async () => {
+    const { getUserMedia } = mockCamera();
+    render(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
+    await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
+    expect(screen.queryByRole("button", { name: "카메라 켜고 확인하기" })).not.toBeInTheDocument();
+    expect(getUserMedia).toHaveBeenCalledWith({ video: { facingMode: "environment" }, audio: false }); // 권한 받기
+    // 표정 관찰에 동의하지 않았으므로 표정 결과는 보내지 않는다
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === "/api/camera")).toBe(false);
+  });
+
+  it("카메라를 끈 환자(표정 관찰 off)에게는 들어올 때 권한을 묻지 않고, 약 확인 때 버튼으로 한 번 묻고 기억한다", async () => {
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "off");
     const { getUserMedia } = mockCamera();
     const first = render(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
     expect(screen.getByText(/한 번 허용하면 다음부터는 바로 켜져요/)).toBeInTheDocument();
     expect(getUserMedia).not.toHaveBeenCalled();
-
     fireEvent.click(screen.getByRole("button", { name: "카메라 켜고 확인하기" }));
-    await waitFor(() => expect(frontCalls(getUserMedia)).toBe(1)); // 후면이 없어 전면으로
     await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
-    // 표정 관찰에 동의하지 않았으므로 표정 결과는 보내지 않는다
-    expect(vi.mocked(fetch).mock.calls.some(([url]) => url === "/api/camera")).toBe(false);
     first.unmount();
-
-    // 다음 약 확인: 묻지 않고 바로 카메라를 켠다
     render(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
     await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
     expect(screen.queryByRole("button", { name: "카메라 켜고 확인하기" })).not.toBeInTheDocument();

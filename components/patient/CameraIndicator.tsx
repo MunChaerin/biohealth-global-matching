@@ -107,12 +107,34 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
     if (!pillMode) setTakenIds([]);
   }, [pillMode]);
 
+  // 환자 화면에 들어오자마자 카메라 권한을 받아 둔다 (약 확인이 열렸을 때 [카메라 켜고 확인하기]를 누르지 않아도 바로 켜지게).
+  // 카메라를 아직 정하지 않은 기기(처음 방문, 터널 주소가 바뀐 경우)에서만 요청한다. 표정 관찰 카메라가 켜져 있으면("on") 권한이 이미 있고
+  // (iOS에서 카메라 두 개가 겹치지 않게), 환자가 카메라를 끈 경우("off")는 존중한다. 거부·카메라 없음이면 약 확인 때 버튼으로 묻는다.
   useEffect(() => {
+    let remembered = false;
     try {
-      setPillCameraAllowed(window.localStorage.getItem(PILL_CAMERA_CONSENT_KEY) === "on");
+      remembered = window.localStorage.getItem(PILL_CAMERA_CONSENT_KEY) === "on";
     } catch {
-      // 읽지 못하면 약 확인 때 다시 묻는다
+      // 읽지 못하면 아래에서 권한을 다시 받는다
     }
+    if (remembered) {
+      setPillCameraAllowed(true);
+      return;
+    }
+    if (readConsent() !== "unknown" || typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return;
+    let cancelled = false;
+    navigator.mediaDevices
+      .getUserMedia({ video: { facingMode: "environment" }, audio: false })
+      .then((stream) => {
+        stream.getTracks().forEach((track) => track.stop()); // 권한만 받고 바로 끈다
+        if (!cancelled) allowPillCamera();
+      })
+      .catch(() => {
+        // 거부·카메라 없음: 약 확인 때 버튼으로 묻는다
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function allowPillCamera() {
@@ -225,9 +247,8 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
           onClose={pillCheck.onClose}
           debugShow={pillCheck.debug ? pill.debugShow : undefined}
           evidence={pill.evidence}
-          ask={pill.ask}
+          imprintReading={pill.imprintReading}
           distance={pill.distance}
-          onAnswer={pill.answerAsk}
           speak={pillCheck.speak}
         />
       ) : !loaded ? null : consent === "unknown" ? (

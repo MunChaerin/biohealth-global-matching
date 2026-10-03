@@ -8,7 +8,7 @@ import type { PillDetection, PillVerdict } from "../../lib/pill/verdict";
 import type { IntakeMethod } from "../../lib/medication/intakeStore";
 import { LYRIBEA } from "../../lib/pill/capsuleOcr";
 import type { DistanceHint } from "../../lib/pill/zoom";
-import type { PillAsk, PillCheckPhase } from "./usePillCheck";
+import type { PillCheckPhase } from "./usePillCheck";
 import styles from "./patient-chat.module.css";
 
 interface Props {
@@ -25,8 +25,7 @@ interface Props {
   debugShow?: (detections: PillDetection[]) => void;
   evidence?: { drugCode: string; image: string } | null; // 카메라로 본 알약 확대 사진 (판정 근거)
   speak?: (text: string) => void; // 음성 안내 (환자 화면의 음성 기능)
-  ask?: PillAsk | null; // 모델이 애매할 때: 각인 읽는 중 / 확대 사진을 보여 주고 묻는 중
-  onAnswer?: (drugCode: string | null) => void; // 고른 약 (null = 아니에요)
+  imprintReading?: boolean; // 각인을 읽는 중
   distance?: DistanceHint | null; // 알약이 너무 가깝다 / 멀다
 }
 
@@ -39,7 +38,7 @@ export const MANUAL_OFFER_MS = 8_000; // 이만큼 계속 알아보지 못하면
  * 맞는 약일 때만 [먹었어요]를 누를 수 있고, 눌러야 복용으로 기록된다. 안내는 화면 문구와 음성으로 함께 준다.
  * 모델·카메라를 쓸 수 없거나 한참 동안 약을 알아보지 못하면 카메라 없이 직접 기록할 수 있다 (의료진 화면에 "직접 기록"으로 표시).
  */
-export function PillCheckPanel({ language, group, takenIds, phase, verdict, cameraProblem, needsCameraConsent, onAllowCamera, onTaken, onClose, debugShow, evidence, speak, ask, onAnswer, distance }: Props) {
+export function PillCheckPanel({ language, group, takenIds, phase, verdict, cameraProblem, needsCameraConsent, onAllowCamera, onTaken, onClose, debugShow, evidence, speak, imprintReading, distance }: Props) {
   const ja = language === "ja";
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -57,8 +56,6 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
   const takenCodes = group.filter((item) => takenIds.includes(item.id)).map((item) => item.drugCode);
   const allDone = remaining.length === 0;
   const matched = verdict.kind === "match" ? remaining.find((item) => item.drugCode === verdict.drugCode) : undefined;
-  // 사진을 보고 고를 약 (아직 안 먹은 약, 모델이 가장 높게 본 약이 앞)
-  const askItems = ask?.kind === "ask" ? ask.candidates.map((code) => remaining.find((item) => item.drugCode === code)).filter((item): item is MedicationItem => !!item) : [];
 
   // 이번 약을 모두 먹으면 [닫기]를 누르지 않아도 잠시 뒤 저절로 닫는다
   const onCloseRef = useRef(onClose);
@@ -136,16 +133,7 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
     tone = "good";
     status = ja ? `服薬を記録しました。次は${nextPrompt}` : `복용을 기록했어요. 이제 ${nextPrompt}`;
     speechKey = `saved:${justSaved}`;
-  } else if (ask?.kind === "ask" && askItems.length === 1) {
-    const item = askItems[0]!;
-    status = ja
-      ? `このお薬は${label(item)}ですか？${item.imprint ? `「${item.imprint}」の文字が見えるか、` : ""}写真を見て教えてください。`
-      : `이 약이 ${label(item)}인가요? ${item.imprint ? `${item.imprint} 글자가 보이는지 ` : ""}사진을 보고 알려 주세요.`;
-    speechKey = `ask:${item.drugCode}`;
-  } else if (ask?.kind === "ask") {
-    status = ja ? "どのお薬ですか？写真を見て選んでください。" : "어떤 약인가요? 사진을 보고 골라 주세요.";
-    speechKey = `ask:${ask.candidates.join(",")}`;
-  } else if (ask?.kind === "reading" && verdict.kind !== "match" && verdict.kind !== "mismatch") {
+  } else if (imprintReading && verdict.kind !== "match" && verdict.kind !== "mismatch") {
     status = ja ? "お薬に刻まれた文字を確認しています…" : "약에 새겨진 글자를 확인하고 있어요…";
   } else if (distance && (verdict.kind === "unsure" || verdict.kind === "checking")) {
     // 가까이 대면 후면 카메라 초점이 안 맞고 학습 때보다 크게 보여서 못 알아본다
@@ -261,31 +249,13 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
           </dl>
         </div>
       ) : null}
-      {ask?.kind === "ask" && askItems.length && !allDone && !justSaved ? (
-        <div className={styles.pillAsk}>
-          {ask.image ? <img src={ask.image} alt={ja ? "カメラで見たお薬" : "카메라로 본 약"} /> : null}
-          <div>
-            {askItems.length === 1 ? (
-              <button type="button" className={styles.pillTaken} onClick={() => onAnswer?.(askItems[0]!.drugCode)}>{ja ? "はい" : "맞아요"}</button>
-            ) : (
-              askItems.map((item) => (
-                <button key={item.id} type="button" className={styles.pillTaken} onClick={() => onAnswer?.(item.drugCode)}>
-                  {label(item)}
-                  {item.imprint ? <small className={styles.pillAskImprint}>{ja ? "刻印" : "각인"} {item.imprint}</small> : null}
-                </button>
-              ))
-            )}
-            <button type="button" className={styles.pillAskNo} onClick={() => onAnswer?.(null)}>{askItems.length === 1 ? (ja ? "いいえ" : "아니에요") : (ja ? "どれでもない" : "둘 다 아니에요")}</button>
-          </div>
-        </div>
-      ) : null}
       {saveFailed ? <small className={styles.pillError}>{ja ? "記録できませんでした。もう一度押してください。" : "기록하지 못했어요. 다시 눌러 주세요."}</small> : null}
       <div className={styles.pillActions}>
         {needsCameraConsent && !allDone ? (
           <button type="button" className={styles.cameraButton} onClick={onAllowCamera}>{ja ? "カメラを使う" : "카메라 켜고 확인하기"}</button>
         ) : null}
         {matched && !justSaved && phase === "running" ? (
-          <button type="button" className={styles.pillTaken} onClick={() => void taken(matched, verdict.kind === "match" && verdict.byPerson ? "confirmed" : "camera")} disabled={saving}>{ja ? "飲みました" : "먹었어요"}</button>
+          <button type="button" className={styles.pillTaken} onClick={() => void taken(matched)} disabled={saving}>{ja ? "飲みました" : "먹었어요"}</button>
         ) : null}
       </div>
       {offerManual ? (
