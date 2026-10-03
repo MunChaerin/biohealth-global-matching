@@ -89,19 +89,17 @@ def background_false_alarms(model: YOLO, bg_dir: Path) -> dict | None:
     }
 
 
-def evaluate(weights: Path, data: Path, classes: list[dict], name: str = "pill_test") -> dict:
-    """시험용 사진(학습 때 안 본 각도)으로 평가: 검출 지표 + 웹과 같은 기준의 '판정' 정확도 + 배경 오인식."""
-    model = YOLO(str(weights))
-    metrics = model.val(data=str(data), split="test", imgsz=IMG_SIZE, plots=True, project=str(HERE / "runs"), name=name, exist_ok=True)
-
-    # 웹 판정 기준: 확신 CONFIDENT 이상인 알약이 정확히 하나이고 그 약이 정답이면 맞음
-    test_dir = Path(data).parent / "test"
+def verdict_accuracy(model: YOLO, folder: Path, classes: list[dict]) -> dict | None:
+    """웹 판정 기준: 확신 기준 이상인 알약이 정확히 하나이고 그 약이 정답이면 맞음."""
+    images = sorted((folder / "images").glob("*.jpg")) if folder.exists() else []
+    if not images:
+        return None
     per_class = Counter()
     correct = Counter()
     wrong_as = Counter()
     unsure = Counter()
-    for image in sorted((test_dir / "images").glob("*.jpg")):
-        truth = int((test_dir / "labels" / f"{image.stem}.txt").read_text().split()[0])
+    for image in images:
+        truth = int((folder / "labels" / f"{image.stem}.txt").read_text().split()[0])
         per_class[truth] += 1
         result = model.predict(str(image), imgsz=IMG_SIZE, conf=DETECT_MIN, verbose=False)[0]
         found = [(int(c), float(p)) for c, p in zip(result.boxes.cls.tolist(), result.boxes.conf.tolist())]
@@ -112,22 +110,32 @@ def evaluate(weights: Path, data: Path, classes: list[dict], name: str = "pill_t
                 wrong_as[(truth, found[0][0])] += 1
         else:
             unsure[truth] += 1
-
-    report = {
-        "mAP50": round(float(metrics.box.map50), 4),
-        "mAP50_95": round(float(metrics.box.map), 4),
+    return {
         "verdict": {
             classes[i]["name"]: {
                 "images": per_class[i],
-                "correct": round(correct[i] / per_class[i], 3) if per_class[i] else None,
-                "unsure": round(unsure[i] / per_class[i], 3) if per_class[i] else None,
+                "correct": round(correct[i] / per_class[i], 3),
+                "unsure": round(unsure[i] / per_class[i], 3),
             }
-            for i in range(len(classes))
+            for i in range(len(classes)) if per_class[i]
         },
         "confusions": {f"{classes[t]['name']} -> {classes[p]['name']}": n for (t, p), n in wrong_as.most_common()},
         "overall_correct": round(sum(correct.values()) / max(1, sum(per_class.values())), 4),
         "overall_wrong_pill": round(sum(wrong_as.values()) / max(1, sum(per_class.values())), 4),
-        "background": background_false_alarms(model, Path(data).parent / "bg_test"),
+    }
+
+
+def evaluate(weights: Path, data: Path, classes: list[dict], name: str = "pill_test") -> dict:
+    """시험: 검출 지표 + 웹과 같은 기준의 '판정' 정확도 (AI Hub 시험 사진 / 시연 기기로 찍은 own_test) + 배경 오인식."""
+    model = YOLO(str(weights))
+    metrics = model.val(data=str(data), split="test", imgsz=IMG_SIZE, plots=True, project=str(HERE / "runs"), name=name, exist_ok=True)
+    root = Path(data).parent
+    report = {
+        "mAP50": round(float(metrics.box.map50), 4),
+        "mAP50_95": round(float(metrics.box.map), 4),
+        **(verdict_accuracy(model, root / "test", classes) or {}),
+        "background": background_false_alarms(model, root / "bg_test"),
+        "ownTest": verdict_accuracy(model, root / "own_test", classes),  # 시연 기기(아이패드 후면 등)로 찍은 사진
     }
     (HERE / "runs" / f"{name}_report.json").write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
     return report
@@ -191,20 +199,24 @@ def export_for_web(weights: Path, classes: list[dict]) -> None:
         "exportedAt": date.today().isoformat(),
         "dataset": "AI Hub 경구약제 이미지 데이터(576) 중 10종 (TS_3, VS_10) + 배경 합성. 돌린 각도 기준 학습/검증/시험 분리. "
                    "v2: COCO val2017 일상 사진을 잘라 '알약 없음'(빈 라벨)으로 학습 2,000 / 검증 200장 추가, 배경 시험 500장",
-        "testMetrics": {k: report.get(k) for k in ("mAP50", "mAP50_95", "overall_correct", "overall_wrong_pill", "background")},
+        "testMetrics": {k: report.get(k) for k in ("mAP50", "mAP50_95", "overall_correct", "overall_wrong_pill", "background", "ownTest")},
     }
     (WEB_MODEL_DIR / "model-metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(f"[웹 모델] {WEB_MODEL_DIR}")
 
 
 def main():
+    global RUN_NAME, MODEL_VERSION
     parser = argparse.ArgumentParser(description="알약 인식 모델 학습")
     parser.add_argument("--data", type=Path, required=True)
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--from", dest="start", default="yolo11n.pt", help="시작 가중치 (v2는 runs/pill/weights/best.pt)")
     parser.add_argument("--export-only", type=Path, default=None)
     parser.add_argument("--eval-only", type=Path, default=None, help="시험만 (예: v1과 비교)")
+    parser.add_argument("--run-name", default=RUN_NAME, help="runs/ 아래 학습 폴더 이름 (v3: pill_v3)")
+    parser.add_argument("--model-version", default=MODEL_VERSION, help="model-metadata.json의 modelVersion (v3: pill-yolo11n-10cls-v3)")
     args = parser.parse_args()
+    RUN_NAME, MODEL_VERSION = args.run_name, args.model_version
     classes = json.loads(CLASSES_JSON.read_text(encoding="utf-8"))["classes"]
 
     if args.eval_only:
