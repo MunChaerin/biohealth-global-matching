@@ -5,7 +5,7 @@ import type { ChatLanguage } from "../../lib/chatbot/types";
 import type { MedicationItem } from "../../lib/medication/schedule";
 import { pillImprint, pillName, withParticle } from "../../lib/pill/catalog";
 import type { PillDetection, PillVerdict } from "../../lib/pill/verdict";
-import type { PillCheckPhase } from "./usePillCheck";
+import type { CapsuleCheck, PillCheckPhase } from "./usePillCheck";
 import styles from "./patient-chat.module.css";
 
 interface Props {
@@ -22,6 +22,8 @@ interface Props {
   debugShow?: (detections: PillDetection[]) => void;
   evidence?: { drugCode: string; image: string } | null; // 카메라로 본 알약 확대 사진 (판정 근거)
   speak?: (text: string) => void; // 음성 안내 (환자 화면의 음성 기능)
+  capsule?: CapsuleCheck | null; // 흰 캡슐 각인 확인 (읽는 중 / 환자에게 묻는 중)
+  onCapsuleAnswer?: (yes: boolean) => void;
 }
 
 const REPEAT_HINT_MS = 6_000; // "한 알씩", "잘 모르겠어요" 같은 안내를 다시 읽어주기까지 최소 간격
@@ -32,7 +34,7 @@ export const MANUAL_OFFER_MS = 8_000; // 이만큼 계속 알아보지 못하면
  * 맞는 약일 때만 [먹었어요]를 누를 수 있고, 눌러야 복용으로 기록된다. 안내는 화면 문구와 음성으로 함께 준다.
  * 모델·카메라를 쓸 수 없거나 한참 동안 약을 알아보지 못하면 카메라 없이 직접 기록할 수 있다 (의료진 화면에 "직접 기록"으로 표시).
  */
-export function PillCheckPanel({ language, group, takenIds, phase, verdict, cameraProblem, needsCameraConsent, onAllowCamera, onTaken, onClose, debugShow, evidence, speak }: Props) {
+export function PillCheckPanel({ language, group, takenIds, phase, verdict, cameraProblem, needsCameraConsent, onAllowCamera, onTaken, onClose, debugShow, evidence, speak, capsule, onCapsuleAnswer }: Props) {
   const ja = language === "ja";
   const [saving, setSaving] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
@@ -113,6 +115,14 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
     tone = "good";
     status = ja ? `服薬を記録しました。次は${nextPrompt}` : `복용을 기록했어요. 이제 ${nextPrompt}`;
     speechKey = `saved:${justSaved}`;
+  } else if (capsule?.kind === "ask") {
+    const imprint = pillImprint(capsule.drugCode) ?? "";
+    status = ja
+      ? `カプセルに「${imprint}」の文字が見えますか？写真を見て教えてください。`
+      : `캡슐에 ${imprint} 글자가 보이나요? 사진을 보고 알려 주세요.`;
+    speechKey = `ask:${capsule.drugCode}`;
+  } else if (capsule?.kind === "reading" && verdict.kind !== "match" && verdict.kind !== "mismatch") {
+    status = ja ? "カプセルに刻まれた文字を確認しています…" : "캡슐에 새겨진 글자를 확인하고 있어요…";
   } else {
     switch (verdict.kind) {
       case "noPill": {
@@ -216,6 +226,15 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
           </dl>
         </div>
       ) : null}
+      {capsule?.kind === "ask" && !allDone && !justSaved ? (
+        <div className={styles.pillAsk}>
+          {capsule.image ? <img src={capsule.image} alt={ja ? "カメラで見たカプセル" : "카메라로 본 캡슐"} /> : null}
+          <div>
+            <button type="button" className={styles.pillTaken} onClick={() => onCapsuleAnswer?.(true)}>{ja ? "見えます" : "맞아요"}</button>
+            <button type="button" className={styles.pillAskNo} onClick={() => onCapsuleAnswer?.(false)}>{ja ? "見えません" : "아니에요"}</button>
+          </div>
+        </div>
+      ) : null}
       {saveFailed ? <small className={styles.pillError}>{ja ? "記録できませんでした。もう一度押してください。" : "기록하지 못했어요. 다시 눌러 주세요."}</small> : null}
       <div className={styles.pillActions}>
         {needsCameraConsent && !allDone ? (
@@ -249,6 +268,7 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
           ))}
           <button type="button" onClick={() => debugShow([{ drugCode: "K-005849", confidence: 0.9, box: [0.4, 0.4, 0.2, 0.1] }])}>다른 약</button>
           <button type="button" onClick={() => debugShow([{ drugCode: group[0]!.drugCode, confidence: 0.5 }])}>애매함</button>
+          <button type="button" onClick={() => debugShow([{ drugCode: "K-045037", confidence: 0.7, box: [0.4, 0.4, 0.2, 0.1] }])}>흰 캡슐</button>
           <button type="button" onClick={() => debugShow([{ drugCode: "a", confidence: 0.9 }, { drugCode: "b", confidence: 0.9 }])}>여러 알</button>
           <button type="button" onClick={() => debugShow([])}>없음</button>
         </div>

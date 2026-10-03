@@ -28,7 +28,7 @@ CLASSES_JSON = HERE / "classes.json"
 WEB_MODEL_DIR = HERE.parent.parent / "public" / "models" / "pill"
 IMG_SIZE = 640
 CONFIDENT = 0.6  # 웹(lib/pill/verdict.ts)의 CONFIDENT와 같은 값
-MISMATCH_CONFIDENT = 0.8  # 웹의 MISMATCH_CONFIDENT (다른 약 판정 기준)
+MISMATCH_CONFIDENT = 0.9  # 웹의 MISMATCH_CONFIDENT (다른 약 판정 기준)
 DETECT_MIN = 0.4  # 웹의 DETECT_MIN_CONFIDENCE
 # 약별 "맞는 약" 기준. 리리베아는 글자 없는 뒷면이 독립목클린 뒷면과 똑같아서, v2가 독립목클린 뒷면을
 # 리리베아로 0.70~0.78 확신했다 (리리베아 진짜 사진은 앞면 0.89~0.92, 뒷면 대부분 0.8 이상).
@@ -184,7 +184,7 @@ def export_for_web(weights: Path, classes: list[dict]) -> None:
             "confidence": CONFIDENT,  # 이보다 낮으면 unknown (학습하지 않은 약 억지 분류 방지)
             "stableMs": 1000,  # 같은 결과가 이만큼 이어져야 판정
             "mismatchConfidence": MISMATCH_CONFIDENT,  # 다른 약은 더 엄격하게
-            "mismatchStableMs": 2000,
+            "mismatchStableMs": 3000,
             "classConfidence": CLASS_CONFIDENCE,  # 약별 맞는 약 기준 (없으면 confidence)
         },
         "trainedAt": date.fromtimestamp(Path(weights).stat().st_mtime).isoformat(),

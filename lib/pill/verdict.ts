@@ -12,8 +12,9 @@ export const CONFIDENT = 0.6; // 이보다 낮으면 어떤 약인지 "잘 모�
 export const STABLE_MS = 1_000; // 같은 약이 이만큼 이어져야 판정
 // "다른 약"은 더 엄격하게: 배경(잠옷 무늬 등)을 0.7대로 꾸준히 약으로 착각한 경우가 있었고,
 // 잘못된 "다른 약" 기록이 의료진에게 가는 게 가장 비싼 실수라서. 기준에 못 미치면 "잘 모르겠어요"로 둔다.
-export const MISMATCH_CONFIDENT = 0.8;
-export const MISMATCH_STABLE_MS = 2_000;
+// v2 웹캠 테스트에서 0.8·2초 기준에 0.81~0.86이 가끔 닿아 0.9·3초로 올렸다.
+export const MISMATCH_CONFIDENT = 0.9;
+export const MISMATCH_STABLE_MS = 3_000;
 export const RELATIVE_MIN = 0.75; // 가장 확신 높은 박스의 이 비율보다 약한 박스는 다른 알약으로 세지 않음 (배경 착각 등)
 
 export type PillReading =

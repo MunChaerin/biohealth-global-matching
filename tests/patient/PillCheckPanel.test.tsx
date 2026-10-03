@@ -88,6 +88,25 @@ describe("PillCheckPanel 판단 근거", () => {
   });
 });
 
+describe("PillCheckPanel 흰 캡슐 각인 확인", () => {
+  it("각인을 읽는 중이면 그렇게 안내한다", () => {
+    render(panel({ kind: "unsure" }, { capsule: { kind: "reading" } }));
+    expect(screen.getByText("캡슐에 새겨진 글자를 확인하고 있어요…")).toBeInTheDocument();
+  });
+
+  it("각인으로 못 정하면 사진과 함께 묻고, 답을 넘긴다", () => {
+    const onCapsuleAnswer = vi.fn();
+    const speak = vi.fn();
+    render(panel({ kind: "unsure" }, { speak, onCapsuleAnswer, capsule: { kind: "ask", drugCode: lyribea.drugCode, image: "data:image/jpeg;base64,AAAA", confidence: 0.7 } }));
+    expect(speak).toHaveBeenLastCalledWith("캡슐에 DWB PGN 50 글자가 보이나요? 사진을 보고 알려 주세요.");
+    expect(screen.getByAltText("카메라로 본 캡슐")).toHaveAttribute("src", "data:image/jpeg;base64,AAAA");
+    fireEvent.click(screen.getByRole("button", { name: "아니에요" }));
+    expect(onCapsuleAnswer).toHaveBeenLastCalledWith(false);
+    fireEvent.click(screen.getByRole("button", { name: "맞아요" }));
+    expect(onCapsuleAnswer).toHaveBeenLastCalledWith(true);
+  });
+});
+
 describe("PillCheckPanel 인식이 안 될 때 직접 기록", () => {
   it("모델을 쓸 수 없으면 카메라 없이 직접 기록할 수 있고, manual로 기록한다", () => {
     const onTaken = vi.fn(async () => true);

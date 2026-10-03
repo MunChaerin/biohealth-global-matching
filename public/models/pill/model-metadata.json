@@ -43,8 +43,8 @@
     "detect": 0.4,
     "confidence": 0.6,
     "stableMs": 1000,
-    "mismatchConfidence": 0.8,
-    "mismatchStableMs": 2000,
+    "mismatchConfidence": 0.9,
+    "mismatchStableMs": 3000,
     "classConfidence": {
       "K-045037": 0.8
     }

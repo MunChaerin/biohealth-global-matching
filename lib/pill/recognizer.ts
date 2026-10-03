@@ -58,6 +58,7 @@ export async function loadPillRecognizer(): Promise<PillRecognizerLoad> {
 /** 모델 없이 화면 흐름을 확인하는 개발용 인식기 (?pillDebug=1). 버튼으로 보이는 약을 정한다. */
 export class DebugPillRecognizer implements PillRecognizer {
   modelVersion = "debug";
+  classConfidence = { "K-045037": 0.8 }; // 실제 model-metadata.json과 같은 약별 기준 (흰 캡슐 각인 확인 흐름용)
   current: PillDetection[] = [];
 
   async detect(): Promise<PillDetection[]> {

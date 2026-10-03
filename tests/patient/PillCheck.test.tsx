@@ -7,7 +7,16 @@ vi.mock("@mediapipe/tasks-vision", () => ({
   FaceLandmarker: { createFromOptions: vi.fn(async () => landmarker) },
 }));
 
+// 흰 캡슐 각인 OCR은 실제 사진이 없으므로 결과만 정해 둔다
+const ocr = vi.hoisted(() => ({ drugCode: null as string | null }));
+vi.mock("../../lib/pill/capsuleOcr", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/pill/capsuleOcr")>()),
+  cropGray: vi.fn(() => ({ data: new Uint8Array(4), width: 2, height: 2 })),
+  readCapsuleImprint: vi.fn(async () => ({ drugCode: ocr.drugCode, texts: [] })),
+}));
+
 import { CAMERA_CONSENT_KEY, CameraIndicator } from "../../components/patient/CameraIndicator";
+import { readCapsuleImprint } from "../../lib/pill/capsuleOcr";
 import { getMedicationSchedule } from "../../lib/medication/schedule";
 
 // 아침 08:00: 리리베아캡슐 50mg + 타이레놀정 500mg
@@ -127,6 +136,43 @@ describe("알약 확인 모드", () => {
     await showPill("다른 약");
     expect(await screen.findByText(/이 약은 무스판정이에요/)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
+  });
+
+  describe("흰 캡슐 (모델이 리리베아로 보지만 기준 0.8에 못 미침)", () => {
+    async function showWhiteCapsule() {
+      window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+      mockCamera();
+      renderPillCheck();
+      await screen.findByRole("button", { name: "흰 캡슐" });
+      await showPill("흰 캡슐");
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 600));
+      });
+    }
+
+    it("각인을 한 번만 읽고, 리리베아 각인이면 맞는 약", async () => {
+      ocr.drugCode = "K-045037";
+      await showWhiteCapsule();
+      expect(await screen.findByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "먹었어요" })).toBeInTheDocument();
+      expect(readCapsuleImprint).toHaveBeenCalledTimes(1); // 매 프레임 읽지 않음
+    });
+
+    it("독립목클린 각인이면 다른 약", async () => {
+      ocr.drugCode = "K-045269";
+      await showWhiteCapsule();
+      expect(await screen.findByText(/이 약은 독립목클린캡슐이에요. 지금 드실 약이 아니에요./)).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
+    });
+
+    it("각인으로 못 정하면 사진을 보여 주고 묻고, [맞아요]면 맞는 약", async () => {
+      ocr.drugCode = null;
+      await showWhiteCapsule();
+      expect(await screen.findByText("캡슐에 DWB PGN 50 글자가 보이나요? 사진을 보고 알려 주세요.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "맞아요" }));
+      expect(await screen.findByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "먹었어요" })).toBeInTheDocument();
+    });
   });
 
   it("다른 약이면 안내하고, 같은 약을 계속 비춰도 의료진 기록은 한 번만 남긴다", async () => {
