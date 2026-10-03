@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET, POST } from "../../app/api/medication/route";
 import { clearMedicationIntakes, dateKey, type TodayMedication } from "../../lib/medication/intakeStore";
+import { clearReminders } from "../../lib/medication/reminderStore";
 
 const patientId = "tanaka-haruko";
 
@@ -28,7 +29,10 @@ async function today(id = patientId) {
 }
 
 describe("/api/medication", () => {
-  beforeEach(() => clearMedicationIntakes());
+  beforeEach(() => {
+    clearMedicationIntakes();
+    clearReminders();
+  });
 
   it("오늘 복약 목록을 시간순으로, 처음엔 모두 미복용으로 돌려준다", async () => {
     const { body } = await today();
@@ -85,6 +89,15 @@ describe("/api/medication", () => {
     expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: withImage })).status).toBe(400);
     const otherPatient = recognition("matched", "K-045037", { patientId: "kim-minsu" });
     expect((await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: otherPatient })).status).toBe(400);
+  });
+
+  it("의료진이 복용 시간별 약 확인 자동 열림 시각을 바꾼다 (기본은 복용 시간)", async () => {
+    expect((await today()).body.reminders).toEqual([{ time: "08:00", openAt: "08:00" }, { time: "18:00", openAt: "18:00" }]);
+    const response = await post({ patientId, event: "reminder", time: "08:00", openAt: "07:45" });
+    expect(response.status).toBe(200);
+    expect((await today()).body.reminders[0]).toEqual({ time: "08:00", openAt: "07:45" });
+    expect((await post({ patientId, event: "reminder", time: "12:00", openAt: "12:00" })).status).toBe(400); // 일정에 없는 시간
+    expect((await post({ patientId, event: "reminder", time: "08:00", openAt: "25:00" })).status).toBe(400);
   });
 
   it("잘못된 요청은 거부한다", async () => {

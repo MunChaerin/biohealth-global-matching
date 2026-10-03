@@ -37,6 +37,24 @@ describe("PatientChat", () => {
     vi.restoreAllMocks();
   });
 
+  it("약 확인 자동 열림 시각이 지나면 약 확인을 저절로 열고, 같은 날 다시 열지 않는다", async () => {
+    window.localStorage.clear();
+    const { getMedicationSchedule } = await import("../../lib/medication/schedule");
+    const items = getMedicationSchedule("tanaka-haruko").map((item) => ({ ...item, status: "pending", mismatchCount: 0 }));
+    const today = { date: "2026-10-03", items, next: items[0], nextGroup: items.slice(0, 2), reminders: [{ time: "08:00", openAt: "00:00" }, { time: "18:00", openAt: "23:59" }] };
+    vi.mocked(fetch).mockImplementation(async (url) => (String(url).startsWith("/api/medication") ? jsonResponse(today) : jsonResponse({})));
+    const first = render(<PatientChat />);
+    expect(await screen.findByRole("dialog", { name: "약 확인" })).toBeInTheDocument();
+    expect(screen.getByText("리리베아캡슐 50mg 1캡슐")).toBeInTheDocument();
+    first.unmount();
+
+    render(<PatientChat />);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.queryByRole("dialog", { name: "약 확인" })).not.toBeInTheDocument();
+  });
+
   it("shows the first question", () => {
     render(<PatientChat />);
     expect(screen.getByText("오늘 가장 불편한 점은 무엇인가요?")).toBeTruthy();

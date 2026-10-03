@@ -15,6 +15,25 @@ function formatTime(iso: string): string {
 export function MedicationStatus({ patientId }: { patientId: string }) {
   const [today, setToday] = useState<TodayMedication | null>(null);
   const [failed, setFailed] = useState(false);
+  // 약 확인 자동 열림 시각: 고치는 중인 값 (복용 시간별), 저장 결과
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [saved, setSaved] = useState<{ time: string; ok: boolean } | null>(null);
+
+  async function saveReminder(time: string, openAt: string) {
+    try {
+      const response = await fetch("/api/medication", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ patientId, event: "reminder", time, openAt }),
+      });
+      if (!response.ok) throw new Error(String(response.status));
+      setToday((await response.json()) as TodayMedication);
+      setDrafts(({ [time]: _done, ...rest }) => rest);
+      setSaved({ time, ok: true });
+    } catch {
+      setSaved({ time, ok: false });
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +94,28 @@ export function MedicationStatus({ patientId }: { patientId: string }) {
         ) : (
           <p className={styles.facialEmpty}>등록된 복약 일정이 없습니다.</p>
         )
+      ) : null}
+      {today?.reminders?.length ? (
+        <div className={styles.reminders} aria-label="약 확인 자동 열림 시각">
+          <b>약 확인 자동 열림</b>
+          <small>정한 시각이 되면 환자 화면에서 약 확인이 저절로 열려요 (하루에 한 번).</small>
+          {today.reminders.map((reminder) => {
+            const value = drafts[reminder.time] ?? reminder.openAt;
+            return (
+              <label key={reminder.time}>
+                <span>{reminder.time} 복용</span>
+                <input
+                  type="time"
+                  value={value}
+                  aria-label={`${reminder.time} 복용 약 확인 자동 열림 시각`}
+                  onChange={(event) => setDrafts((current) => ({ ...current, [reminder.time]: event.target.value }))}
+                />
+                <button type="button" onClick={() => void saveReminder(reminder.time, value)} disabled={value === reminder.openAt}>저장</button>
+                {saved?.time === reminder.time ? <em>{saved.ok ? "저장했어요" : "저장하지 못했어요"}</em> : null}
+              </label>
+            );
+          })}
+        </div>
       ) : null}
       <small className={styles.facialFoot}>환자가 카메라로 약을 확인한 뒤 직접 누른 기록이에요. "사진 확인"은 모델이 애매해서 확대 사진을 보고 환자가 맞다고 고른 기록, "직접 기록"은 카메라로 확인하지 못하고 환자가 직접 남긴 기록이에요. 실제 복용은 의료진이 확인해 주세요.</small>
     </section>

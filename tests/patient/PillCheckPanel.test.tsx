@@ -62,6 +62,21 @@ describe("PillCheckPanel - 같은 시간에 2알을 한 알씩", () => {
     expect(screen.getByText(/이 약은 무스판정이에요. 지금 드실 약이 아니에요. 리리베아캡슐 50mg\(.*\), 타이레놀정 500mg\(흰색 길쭉한 알약\)을 비춰 주세요./)).toBeInTheDocument();
   });
 
+  it("모두 먹으면 [닫기]를 누르지 않아도 5초 뒤 저절로 닫는다", () => {
+    vi.useFakeTimers();
+    try {
+      const onClose = vi.fn();
+      render(panel({ kind: "noPill" }, { onClose, takenIds: [lyribea.id, tylenol.id] }));
+      expect(screen.getByText("잠시 후 자동으로 닫혀요.")).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(4_900));
+      expect(onClose).not.toHaveBeenCalled();
+      act(() => vi.advanceTimersByTime(200));
+      expect(onClose).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("모두 먹으면 끝났다고 안내하고 닫기 버튼만 남긴다", () => {
     const speak = vi.fn();
     render(panel({ kind: "noPill" }, { speak, takenIds: [lyribea.id, tylenol.id] }));

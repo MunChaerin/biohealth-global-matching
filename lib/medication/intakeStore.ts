@@ -1,4 +1,5 @@
 import type { PillRecognitionResult } from "../pill/result";
+import { getReminders, type MedicationReminder } from "./reminderStore";
 import { getMedicationSchedule, type MedicationItem } from "./schedule";
 
 // 오늘 복약 기록. 지금은 서버 메모리 (카메라 결과처럼 데모용 - 서버 재시작 시 사라짐).
@@ -25,6 +26,7 @@ export interface TodayMedication {
   items: MedicationStatus[];
   next: MedicationStatus | null; // 아직 안 먹은 약 중 가장 이른 것
   nextGroup: MedicationStatus[]; // next와 같은 시간에 먹을, 아직 안 먹은 약들 (한 번에 확인)
+  reminders: MedicationReminder[]; // 복용 시간별 약 확인 자동 열림 시각 (의료진이 조정)
 }
 
 type Store = Map<string, Map<string, IntakeRecord>>;
@@ -54,7 +56,7 @@ export function getTodayMedication(patientId: string, now: Date = new Date()): T
   });
   const next = items.find((item) => item.status === "pending") ?? null;
   const nextGroup = next ? items.filter((item) => item.status === "pending" && item.time === next.time) : [];
-  return { date, items, next, nextGroup };
+  return { date, items, next, nextGroup, reminders: getReminders(patientId) };
 }
 
 /** [먹었어요]. 이미 기록돼 있으면 처음 시각을 유지한다. 인식만으로는 기록하지 않는다. */

@@ -299,10 +299,10 @@ describe("알약 확인 모드", () => {
     expect(await screen.findByText(/잘 모르겠어요/)).toBeInTheDocument();
   });
 
-  it("표정 카메라에 동의하지 않았으면 이번 확인에만 카메라를 쓸지 먼저 묻는다", async () => {
+  it("표정 카메라에 동의하지 않았으면 약 확인용 카메라를 처음 한 번만 묻고, 다음부터는 바로 켠다", async () => {
     const { getUserMedia } = mockCamera();
-    renderPillCheck();
-    expect(screen.getByText(/이번 확인에만 쓰고/)).toBeInTheDocument();
+    const first = render(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
+    expect(screen.getByText(/한 번 허용하면 다음부터는 바로 켜져요/)).toBeInTheDocument();
     expect(getUserMedia).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "카메라 켜고 확인하기" }));
@@ -310,6 +310,12 @@ describe("알약 확인 모드", () => {
     await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
     // 표정 관찰에 동의하지 않았으므로 표정 결과는 보내지 않는다
     expect(vi.mocked(fetch).mock.calls.some(([url]) => url === "/api/camera")).toBe(false);
+    first.unmount();
+
+    // 다음 약 확인: 묻지 않고 바로 카메라를 켠다
+    render(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
+    await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
+    expect(screen.queryByRole("button", { name: "카메라 켜고 확인하기" })).not.toBeInTheDocument();
   });
 
   it("알약 확인 중에는 카메라 해상도를 높이고(카메라는 그대로), 끝나면 표정 관찰용으로 되돌린다", async () => {

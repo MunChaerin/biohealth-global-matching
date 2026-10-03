@@ -30,6 +30,7 @@ interface Props {
   distance?: DistanceHint | null; // 알약이 너무 가깝다 / 멀다
 }
 
+const AUTO_CLOSE_MS = 5_000; // 이번 약을 모두 먹으면 안내를 읽어 준 뒤 이만큼 있다가 저절로 닫는다
 const REPEAT_HINT_MS = 6_000; // "한 알씩", "잘 모르겠어요" 같은 안내를 다시 읽어주기까지 최소 간격
 export const MANUAL_OFFER_MS = 8_000; // 이만큼 계속 알아보지 못하면 직접 기록 버튼을 보여준다
 
@@ -58,6 +59,15 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
   const matched = verdict.kind === "match" ? remaining.find((item) => item.drugCode === verdict.drugCode) : undefined;
   // 사진을 보고 고를 약 (아직 안 먹은 약, 모델이 가장 높게 본 약이 앞)
   const askItems = ask?.kind === "ask" ? ask.candidates.map((code) => remaining.find((item) => item.drugCode === code)).filter((item): item is MedicationItem => !!item) : [];
+
+  // 이번 약을 모두 먹으면 [닫기]를 누르지 않아도 잠시 뒤 저절로 닫는다
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  useEffect(() => {
+    if (!allDone) return;
+    const timer = setTimeout(() => onCloseRef.current(), AUTO_CLOSE_MS);
+    return () => clearTimeout(timer);
+  }, [allDone]);
 
   // 방금 먹은 약을 화면에서 치우면 "기록했어요" 안내를 끝낸다
   useEffect(() => {
@@ -104,7 +114,9 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
     status = ja ? "今回のお薬はすべて飲みました。記録しました。" : "이번 약을 모두 드셨어요. 기록했어요.";
     speechKey = "allDone";
   } else if (needsCameraConsent) {
-    status = ja ? "お薬の確認にカメラを使います。この確認のときだけ使い、映像は保存・送信しません。" : "약 확인에 카메라를 사용해요. 이번 확인에만 쓰고, 영상은 저장하거나 보내지 않아요.";
+    status = ja
+      ? "お薬の確認にカメラを使います。お薬を確認するときだけ使い、映像は保存・送信しません。一度許可すると次からはすぐに始まります。"
+      : "약 확인에 카메라를 사용해요. 약을 확인할 때만 쓰고, 영상은 저장하거나 보내지 않아요. 한 번 허용하면 다음부터는 바로 켜져요.";
     speechKey = "consent";
   } else if (cameraProblem) {
     tone = "warn";
@@ -235,6 +247,7 @@ export function PillCheckPanel({ language, group, takenIds, phase, verdict, came
       <p className={`${styles.pillStatus} ${tone === "good" ? styles.pillGood : tone === "warn" ? styles.pillWarn : ""}`} role="status" aria-live="polite">
         {status}
       </p>
+      {allDone ? <small className={styles.pillAutoClose}>{ja ? "まもなく自動で閉じます。" : "잠시 후 자동으로 닫혀요."}</small> : null}
       {showEvidence ? (
         <div className={styles.pillEvidence}>
           <img src={evidence!.image} alt={ja ? "カメラで見たお薬" : "카메라로 본 약"} />

@@ -12,6 +12,8 @@ import styles from "./patient-chat.module.css";
 
 // 환자가 카메라를 켜기로 동의했는지. 한 번 정하면 이 기기에서 기억하고, 언제든 끌 수 있다.
 export const CAMERA_CONSENT_KEY = "carelink.cameraConsent";
+// 약 확인용 카메라 동의 (표정 관찰과 따로). 한 번 허용하면 이 기기에서 기억해서 다음부터는 바로 켠다.
+export const PILL_CAMERA_CONSENT_KEY = "carelink.pillCameraConsent";
 type Consent = "unknown" | "on" | "off";
 
 function readConsent(): Consent {
@@ -102,11 +104,25 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
   });
 
   useEffect(() => {
-    if (!pillMode) {
-      setPillCameraAllowed(false); // 알약 확인이 끝나면 다음 확인 때 다시 묻는다
-      setTakenIds([]);
-    }
+    if (!pillMode) setTakenIds([]);
   }, [pillMode]);
+
+  useEffect(() => {
+    try {
+      setPillCameraAllowed(window.localStorage.getItem(PILL_CAMERA_CONSENT_KEY) === "on");
+    } catch {
+      // 읽지 못하면 약 확인 때 다시 묻는다
+    }
+  }, []);
+
+  function allowPillCamera() {
+    setPillCameraAllowed(true);
+    try {
+      window.localStorage.setItem(PILL_CAMERA_CONSENT_KEY, "on");
+    } catch {
+      // 저장이 안 되면 이번 화면에서만
+    }
+  }
 
   useEffect(() => {
     setConsent(readConsent());
@@ -197,7 +213,7 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
           verdict={pill.verdict}
           cameraProblem={cameraProblem}
           needsCameraConsent={!cameraEnabled}
-          onAllowCamera={() => setPillCameraAllowed(true)}
+          onAllowCamera={allowPillCamera}
           onTaken={async (item, method) => {
             const ok = await pill.confirmTaken(item, method);
             if (ok) {

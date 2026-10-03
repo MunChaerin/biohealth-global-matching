@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MedicationStatus } from "../../components/clinician/MedicationStatus";
 import type { TodayMedication } from "../../lib/medication/intakeStore";
@@ -14,6 +14,7 @@ const today: TodayMedication = {
   ],
   next: { ...tylenol!, status: "pending", mismatchCount: 0 },
   nextGroup: [{ ...tylenol!, status: "pending", mismatchCount: 0 }],
+  reminders: [{ time: "08:00", openAt: "08:00" }, { time: "18:00", openAt: "18:00" }],
 };
 
 describe("MedicationStatus", () => {
@@ -38,6 +39,19 @@ describe("MedicationStatus", () => {
     vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify(confirmed)));
     render(<MedicationStatus patientId="tanaka-haruko" />);
     expect(await screen.findByText("사진 확인")).toBeInTheDocument();
+  });
+
+  it("복용 시간별 약 확인 자동 열림 시각을 바꿔 저장한다", async () => {
+    const changed = { ...today, reminders: [{ time: "08:00", openAt: "07:50" }, { time: "18:00", openAt: "18:00" }] };
+    vi.mocked(fetch).mockImplementation(async (_url, init) => new Response(JSON.stringify((init as RequestInit | undefined)?.method === "POST" ? changed : today)));
+    render(<MedicationStatus patientId="tanaka-haruko" />);
+    const input = await screen.findByLabelText("08:00 복용 약 확인 자동 열림 시각");
+    expect(input).toHaveValue("08:00");
+    fireEvent.change(input, { target: { value: "07:50" } });
+    fireEvent.click(within(input.closest("label")!).getByRole("button", { name: "저장" }));
+    expect(await screen.findByText("저장했어요")).toBeInTheDocument();
+    const post = vi.mocked(fetch).mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST")!;
+    expect(JSON.parse(String((post[1] as RequestInit).body))).toEqual({ patientId: "tanaka-haruko", event: "reminder", time: "08:00", openAt: "07:50" });
   });
 
   it("불러오지 못하면 그렇게 표시한다", async () => {

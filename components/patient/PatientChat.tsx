@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CameraIndicator } from "./CameraIndicator";
 import { useTodayMedication } from "./useTodayMedication";
 import type { MedicationItem } from "../../lib/medication/schedule";
+import { clockTime, dueGroup } from "../../lib/medication/autoOpen";
 import { ChatInput } from "./ChatInput";
 import { ChatMessage } from "./ChatMessage";
 import { SafetyNotice } from "./SafetyNotice";
@@ -20,6 +21,27 @@ function localizeInitialMessage(text: string, language: ChatLanguage): string {
   if (language === "ja" && text === "오늘 가장 불편한 점은 무엇인가요?") return "今日、いちばんつらいことは何ですか？";
   if (language === "ko" && text === "今日、いちばんつらいことは何ですか？") return "오늘 가장 불편한 점은 무엇인가요?";
   return text;
+}
+
+const AUTO_OPEN_CHECK_MS = 15_000;
+const AUTO_OPENED_KEY = "carelink.pillAutoOpened"; // 이 기기에서 오늘 자동으로 연 복용 시간 ("환자|날짜|시간")
+
+function readAutoOpened(patientId: string): string[] {
+  try {
+    const all = JSON.parse(window.localStorage.getItem(AUTO_OPENED_KEY) ?? "[]") as string[];
+    return all.filter((key) => key.startsWith(`${patientId}|`)).map((key) => key.slice(patientId.length + 1));
+  } catch {
+    return [];
+  }
+}
+
+function markAutoOpened(patientId: string, date: string, time: string) {
+  try {
+    const all = (JSON.parse(window.localStorage.getItem(AUTO_OPENED_KEY) ?? "[]") as string[]).filter((key) => key.includes(`|${date}|`)); // 지난 날짜는 지움
+    window.localStorage.setItem(AUTO_OPENED_KEY, JSON.stringify([...new Set([...all, `${patientId}|${date}|${time}`])]));
+  } catch {
+    // 저장이 안 되면 이번 화면에서만 (다시 열릴 수 있음)
+  }
 }
 
 export function PatientChat() {
@@ -38,6 +60,21 @@ export function PatientChat() {
   const medication = useTodayMedication(persona.id);
   const [pillCheckGroup, setPillCheckGroup] = useState<MedicationItem[] | null>(null);
   const [pillDebug, setPillDebug] = useState(false);
+  const today = medication.today;
+  // 시간이 되면(의료진이 정한 자동 열림 시각) 약 확인을 저절로 연다. 같은 복용 시간은 하루에 한 번만 (닫으면 다시 열지 않음)
+  useEffect(() => {
+    if (!today || pillCheckGroup) return;
+    const check = () => {
+      const opened = readAutoOpened(persona.id);
+      const due = dueGroup(today, clockTime(), new Set(opened));
+      if (!due) return;
+      markAutoOpened(persona.id, today.date, due.time);
+      setPillCheckGroup(due.items);
+    };
+    check();
+    const timer = setInterval(check, AUTO_OPEN_CHECK_MS);
+    return () => clearInterval(timer);
+  }, [today, pillCheckGroup, persona.id]);
   useEffect(() => {
     // 알약 인식 모델 없이 화면 흐름을 확인하는 개발용 모드 (?pillDebug=1)
     setPillDebug(process.env.NODE_ENV !== "production" && new URLSearchParams(window.location.search).get("pillDebug") === "1");
@@ -161,7 +198,11 @@ export function PatientChat() {
           <div className={styles.medicineAction}><span>{next ? (isJapanese ? "飲む前にカメラでお薬を確認します。" : "드시기 전에 카메라로 약을 확인해요.") : copy.medicineHint}</span>
             {allTaken
               ? <button type="button" className={styles.completed} disabled>{copy.takenDone}</button>
-              : <button type="button" onClick={() => group.length && setPillCheckGroup(group)} disabled={!group.length || !!pillCheckGroup}>{copy.taken}</button>}
+              : <button type="button" onClick={() => {
+                  if (!group.length) return;
+                  if (medication.today) markAutoOpened(persona.id, medication.today.date, group[0]!.time); // 직접 열었으면 그 시간에는 자동으로 다시 열지 않음
+                  setPillCheckGroup(group);
+                }} disabled={!group.length || !!pillCheckGroup}>{copy.taken}</button>}
           </div>
         </>;
       })()}</section><section className={styles.easyPlanCard}><div className={styles.planTitle}><span>♡</span><div><p>{copy.planLabel}</p><h2>{explanation ? (isJapanese ? "医療スタッフからの説明" : "의료진이 보낸 설명") : copy.planTitle}</h2></div></div><p>{explanation ?? copy.planText}</p><button type="button" onClick={() => speech.speak(explanation ?? copy.planText)}>{copy.listen}</button></section></div>

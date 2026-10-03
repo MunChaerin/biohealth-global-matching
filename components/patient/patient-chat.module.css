@@ -42,8 +42,18 @@
 .cameraAssist { display: block; margin-top: 6px; color: #0b6e72; font-size: 10px; }
 .largeText .sectionKicker { font-size: 14px; }.largeText .patientWelcome h1 { font-size: 36px; }.largeText .patientWelcome > div > p:last-child { font-size: 18px; }.largeText .patientTools button, .largeText .languageSwitch { font-size: 15px; }.largeText .notice { font-size: 16px; }.largeText .conversationHead b { font-size: 17px; }.largeText .conversationHead small, .largeText .voiceLabel { font-size: 14px; }.largeText .messageBubble { font-size: 17px; }.largeText .replyArea > p, .largeText .quickReplies button, .largeText .inputForm textarea, .largeText .inputForm button { font-size: 17px; }.largeText .assistStrip, .largeText .moodCard, .largeText .careCallCard, .largeText .medicineCard, .largeText .easyPlanCard { font-size: 16px; }.largeText .moodCard h2, .largeText .medicineCard h2, .largeText .easyPlanCard h2 { font-size: 22px; }.largeText .moodCard p, .largeText .careCallCard small, .largeText .medicineCard small, .largeText .easyPlanCard p { font-size: 14px; }.largeText .quickReplies { gap: 8px; }.largeText .quickReplies button { padding: 10px 13px; }.largeText .inputForm textarea { min-height: 78px; }
 .cameraVideoLayer { display: contents; }
-/* 약 확인 패널: 위쪽에 붙이고 아래 채팅 입력·[보내기] 줄은 가리지 않게 높이 제한 (넘치면 패널 안에서 스크롤) */
-.cameraPillMode { position: fixed; top: 16px; right: 24px; z-index: 50; flex-direction: column; align-items: stretch; gap: 12px; width: min(520px, calc(100vw - 32px)); max-height: calc(100vh - 220px); padding: 16px; overflow-y: auto; background: #fff; border: 1px solid #c9ddd8; border-radius: 20px; box-shadow: 0 24px 60px rgba(17,79,75,.22); }
+/* 약 확인: 화면 전체를 채운다 (어르신이 보기 쉽게). 가로로 넓은 화면(아이패드 가로)은 영상 | 안내 두 칸 */
+.cameraPillMode { position: fixed; inset: 0; z-index: 50; flex-direction: column; align-items: stretch; gap: 16px; width: 100vw; height: 100dvh; padding: max(16px, env(safe-area-inset-top)) 20px max(16px, env(safe-area-inset-bottom)); overflow-y: auto; background: #fff; border: 0; border-radius: 0; }
+.cameraPillMode .pillVideoBox { width: min(100%, calc(58dvh * 4 / 3)); align-self: center; }
+.cameraPillMode .pillPanel { font-size: 15px; }
+.cameraPillMode .pillStatus { font-size: 20px; }
+.cameraPillMode .pillHeading b { font-size: 22px; }
+.pillAutoClose { color: #4d6b64; font-size: 14px; }
+@media (min-aspect-ratio: 5/4) and (min-width: 900px) {
+  .cameraPillMode { flex-direction: row; align-items: flex-start; }
+  .cameraPillMode .pillVideoBox { flex: 1.3 1 0; width: auto; max-width: calc((100dvh - 32px) * 4 / 3); }
+  .cameraPillMode .pillPanel { flex: 1 1 0; max-height: calc(100dvh - 32px); overflow-y: auto; }
+}
 .pillVideoBox { position: relative; flex: none; aspect-ratio: 4 / 3; overflow: hidden; background: #e8f0ee; border-radius: 14px; }
 /* 알약을 보는 가운데 네모: 짧은 변(높이)의 60% 정사각형 (GUIDE_FRACTION). 바깥은 어둡게 */
 .pillGuide { position: absolute; top: 50%; left: 50%; height: 60%; aspect-ratio: 1; transform: translate(-50%, -50%); border: 3px dashed rgba(255,255,255,.95); border-radius: 14px; box-shadow: 0 0 0 9999px rgba(0,0,0,.3); pointer-events: none; }
