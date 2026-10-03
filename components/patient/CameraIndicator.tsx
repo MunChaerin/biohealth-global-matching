@@ -7,6 +7,7 @@ import type { MedicationItem } from "../../lib/medication/schedule";
 import { PillCheckPanel } from "./PillCheckPanel";
 import { sendReport, useFaceExpression, type ExpressionAnalysis, type MouthAssistStatus } from "./useFaceExpression";
 import { usePillCheck } from "./usePillCheck";
+import { useRearCamera } from "./useRearCamera";
 import styles from "./patient-chat.module.css";
 
 // 환자가 카메라를 켜기로 동의했는지. 한 번 정하면 이 기기에서 기억하고, 언제든 끌 수 있다.
@@ -78,8 +79,13 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
   const remainingPills = pillGroup.filter((item) => !takenIds.includes(item.id));
   const cameraEnabled = consent === "on" || (pillMode && pillCameraAllowed);
   const analysis: ExpressionAnalysis = pillMode ? (consent === "on" ? "paused" : "off") : "on";
-  const { videoRef, status, previewFilter, correctedFrame, cameraSize } = useFaceExpression(cameraEnabled, patientId, setMouthStatus, analysis);
-  const cameraWorking = cameraEnabled && status !== "off" && status !== "starting" && status !== "permissionDenied" && status !== "unavailable";
+  // 알약 확인은 후면 카메라(자동 초점)로. 후면을 켜는 동안·쓰는 동안 전면(표정 관찰) 카메라는 끈다 (한 번에 하나만)
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  const rear = useRearCamera(pillMode && cameraEnabled, videoElement);
+  const usingRear = pillMode && (rear.state === "trying" || rear.state === "rear");
+  const { videoRef, status, previewFilter, correctedFrame, cameraSize } = useFaceExpression(cameraEnabled && !usingRear, patientId, setMouthStatus, analysis);
+  const frontWorking = cameraEnabled && !usingRear && status !== "off" && status !== "starting" && status !== "permissionDenied" && status !== "unavailable";
+  const cameraWorking = (pillMode && rear.state === "rear") || frontWorking;
   const pill = usePillCheck({
     active: pillMode && cameraWorking,
     medications: remainingPills,
@@ -101,6 +107,12 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
     setConsent(readConsent());
     setLoaded(true);
   }, []);
+
+  // 후면 카메라로 약을 확인하는 동안 표정 관찰은 멈춰 있으므로, 표정 관찰에 동의한 환자면 의료진 화면에 알린다
+  const rearActive = pillMode && rear.state === "rear";
+  useEffect(() => {
+    if (rearActive && consent === "on") void sendReport({ patientId, measuredAt: new Date().toISOString(), status: "paused" });
+  }, [rearActive, consent, patientId]);
 
   function turnOn() {
     saveConsent("on");
@@ -125,6 +137,7 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
         : cameraEnabled && !cameraWorking
           ? isJapanese ? "カメラを起動しています…" : "카메라를 켜고 있어요…"
           : null;
+  const shownSize = rearActive ? rear.size : cameraSize;
   const showVideo = pillMode ? cameraWorking : live;
 
   return (
@@ -138,8 +151,11 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
           어두운 영상은 분석용 프레임과 마찬가지로 미리보기도 밝게 보정한다. */}
       <div className={pillMode ? styles.pillVideoBox : styles.cameraVideoLayer}>
         <video
-          ref={videoRef}
-          className={showVideo ? styles.cameraPreview : styles.hiddenVideo}
+          ref={(element) => {
+            videoRef.current = element;
+            setVideoElement(element);
+          }}
+          className={showVideo ? `${styles.cameraPreview} ${rearActive ? styles.rearPreview : ""}` : styles.hiddenVideo}
           style={showVideo && previewFilter !== 1 ? { filter: `brightness(${previewFilter})` } : undefined}
           muted
           playsInline
@@ -148,8 +164,8 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
         {/* 알약은 이 네모 안만 본다 (lib/pill/zoom.ts GUIDE_FRACTION과 같은 크기) */}
         {pillMode && showVideo ? <div className={styles.pillGuide} aria-hidden="true" /> : null}
         {/* 개발 중: 기기에서 실제로 받은 카메라 해상도 (예: 아이패드에서 몇이 나오는지 확인용) */}
-        {pillMode && showVideo && cameraSize && process.env.NODE_ENV !== "production" ? (
-          <small className={styles.pillCameraSize}>{cameraSize.width}x{cameraSize.height}</small>
+        {pillMode && showVideo && shownSize && process.env.NODE_ENV !== "production" ? (
+          <small className={styles.pillCameraSize}>{rearActive ? "후면 " : ""}{shownSize.width}x{shownSize.height}</small>
         ) : null}
       </div>
 

@@ -16,6 +16,7 @@ vi.mock("../../lib/pill/capsuleOcr", async (importOriginal) => ({
 }));
 
 import { CAMERA_CONSENT_KEY, CameraIndicator } from "../../components/patient/CameraIndicator";
+import { resetRearCameraMemory } from "../../components/patient/useRearCamera";
 import { readCapsuleImprint } from "../../lib/pill/capsuleOcr";
 import { getMedicationSchedule } from "../../lib/medication/schedule";
 
@@ -23,12 +24,22 @@ import { getMedicationSchedule } from "../../lib/medication/schedule";
 const morning = getMedicationSchedule("tanaka-haruko").filter((item) => item.time === "08:00");
 const [lyribea, tylenol] = morning as [(typeof morning)[number], (typeof morning)[number]];
 
+const wantsRear = (constraints: MediaStreamConstraints) =>
+  typeof constraints.video === "object" && JSON.stringify(constraints.video.facingMode) === JSON.stringify({ exact: "environment" });
+
+/** 카메라 흉내. 기본은 후면 카메라가 없는 노트북 (후면 요청은 실패, 전면만 켜짐). */
 function mockCamera() {
   const track = { stop: vi.fn() };
-  const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [track] });
+  const getUserMedia = vi.fn(async (constraints: MediaStreamConstraints) => {
+    if (wantsRear(constraints)) throw new DOMException("no rear camera", "OverconstrainedError");
+    return { getTracks: () => [track] };
+  });
   Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
   return { getUserMedia, track };
 }
+
+const frontCalls = (getUserMedia: { mock: { calls: unknown[][] } }) =>
+  getUserMedia.mock.calls.filter(([constraints]) => !wantsRear(constraints as MediaStreamConstraints)).length;
 
 function medicationPosts(event?: string) {
   return vi
@@ -51,6 +62,7 @@ describe("알약 확인 모드", () => {
 
   beforeEach(() => {
     window.localStorage.clear();
+    resetRearCameraMemory();
     vi.stubGlobal("fetch", vi.fn(async (url: string) => (url.includes("model-metadata") ? new Response("", { status: 404 }) : new Response("{}"))));
     vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
     // jsdom에는 실제 영상이 없으므로 영상이 준비된 것처럼 만든다
@@ -213,7 +225,7 @@ describe("알약 확인 모드", () => {
     expect(getUserMedia).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "카메라 켜고 확인하기" }));
-    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(frontCalls(getUserMedia)).toBe(1)); // 후면이 없어 전면으로
     await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
     // 표정 관찰에 동의하지 않았으므로 표정 결과는 보내지 않는다
     expect(vi.mocked(fetch).mock.calls.some(([url]) => url === "/api/camera")).toBe(false);
@@ -229,8 +241,20 @@ describe("알약 확인 모드", () => {
       }),
       getSettings: () => settings,
     };
-    const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [track], getVideoTracks: () => [track] });
+    const getUserMedia = vi.fn(async (constraints: MediaStreamConstraints) => {
+      if (wantsRear(constraints)) throw new DOMException("no rear camera", "OverconstrainedError");
+      return { getTracks: () => [track], getVideoTracks: () => [track] };
+    });
     Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+    resetRearCameraMemory();
+    // 후면이 없다는 걸 이미 알고 있는 노트북: 약 확인 때 전면 카메라를 끄지 않고 해상도만 바꾼다
+    const first = render(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
+    await waitFor(() => expect(getUserMedia.mock.calls.some(([c]) => wantsRear(c))).toBe(true));
+    await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
+    first.unmount();
+    getUserMedia.mockClear();
+    track.applyConstraints.mockClear();
+    track.stop.mockClear();
 
     const { rerender } = render(<CameraIndicator patientId="tanaka-haruko" />);
     await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
@@ -242,6 +266,28 @@ describe("알약 확인 모드", () => {
     await waitFor(() => expect(track.applyConstraints).toHaveBeenLastCalledWith({ width: { ideal: 640 }, height: { ideal: 480 } }));
     expect(getUserMedia).toHaveBeenCalledTimes(1); // 카메라를 새로 켜지 않음
     expect(track.stop).not.toHaveBeenCalled();
+  });
+
+  it("후면 카메라가 있는 기기(아이패드)는 약 확인 때 후면으로 바꾸고, 끝나면 전면(표정 관찰)으로 돌아간다", async () => {
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    const front = { stop: vi.fn() };
+    const rearTrack = { stop: vi.fn(), getSettings: () => ({ width: 1920, height: 1080 }) };
+    const getUserMedia = vi.fn(async (constraints: MediaStreamConstraints) =>
+      wantsRear(constraints) ? { getTracks: () => [rearTrack], getVideoTracks: () => [rearTrack] } : { getTracks: () => [front] },
+    );
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+
+    const { rerender } = render(<CameraIndicator patientId="tanaka-haruko" />);
+    await waitFor(() => expect(frontCalls(getUserMedia)).toBe(1));
+    rerender(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
+    expect(await screen.findByText("후면 1920x1080")).toBeInTheDocument();
+    expect(front.stop).toHaveBeenCalled(); // 한 번에 카메라 하나만
+    expect(screen.getByLabelText("약 확인 카메라 미리보기").className).toMatch(/rearPreview/); // 거울 모드 아님
+    await screen.findByRole("button", { name: "리리베아캡슐 50mg" }); // 후면 영상으로 약 확인 진행
+
+    rerender(<CameraIndicator patientId="tanaka-haruko" />);
+    await waitFor(() => expect(rearTrack.stop).toHaveBeenCalled());
+    await waitFor(() => expect(frontCalls(getUserMedia)).toBe(2)); // 표정 관찰 카메라 다시 켬
   });
 
   it("학습한 모델이 아직 없으면 준비 전이라고 안내한다", async () => {
