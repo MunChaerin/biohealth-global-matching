@@ -73,8 +73,9 @@ export function useRearCamera(active: boolean, video: HTMLVideoElement | null, f
         result = await navigator.mediaDevices.getUserMedia(REAR_CONSTRAINTS);
       } catch (error) {
         if (cancelled) return;
-        // 권한 거부는 기기 문제가 아니므로 기억하지 않는다 (전면 카메라 쪽에서 권한 안내)
-        if (!retry && !(error instanceof DOMException && error.name === "NotAllowedError")) rearKnownUnavailable = true;
+        // 어떤 실패든(권한 거부 포함) 이 화면을 쓰는 동안 기억한다. 기억하지 않으면 전면으로 대신하는 순간
+        // 다시 "전면이 꺼지길 기다림 -> 후면 요청 -> 실패 -> 전면"을 끝없이 반복한다 (권한 거부면 전면 쪽에서 권한 안내)
+        rearKnownUnavailable = true;
         console.info("[카메라] 후면 카메라를 쓸 수 없어 전면 카메라로 확인합니다.", error);
         setState("unavailable");
         return;
@@ -91,8 +92,12 @@ export function useRearCamera(active: boolean, video: HTMLVideoElement | null, f
         console.warn(`[카메라] 후면 카메라 트랙이 종료됨${retry ? " (다시 요청 후에도) -> 전면으로 대신" : " -> 한 번 다시 요청"}`);
         stopOpened();
         setStream(null);
-        if (retry) setState("unavailable");
-        else void open(true);
+        if (retry) {
+          rearKnownUnavailable = true; // 다시 요청해도 끊기면 이 화면에서는 전면으로 (반복 전환 방지)
+          setState("unavailable");
+        } else {
+          void open(true);
+        }
       });
       const settings = track?.getSettings?.();
       const nextSize = settings?.width && settings?.height ? { width: settings.width, height: settings.height } : null;

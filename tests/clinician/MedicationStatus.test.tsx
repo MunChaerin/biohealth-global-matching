@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MedicationStatus } from "../../components/clinician/MedicationStatus";
 import type { TodayMedication } from "../../lib/medication/intakeStore";
@@ -21,14 +21,14 @@ describe("MedicationStatus", () => {
   beforeEach(() => vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(today)))));
   afterEach(() => vi.unstubAllGlobals());
 
-  it("오늘 약별 복용 여부와 다른 약을 비춘 기록을 보여준다", async () => {
+  it("오늘 약별 복용 여부와 기록 방식을 보여준다 ('다른 약을 비춤'은 표시하지 않음)", async () => {
     render(<MedicationStatus patientId="tanaka-haruko" />);
     expect(await screen.findByText("2 / 2 복용")).toBeInTheDocument();
 
     const [first, second] = screen.getAllByRole("listitem");
     expect(within(first!).getByText("리리베아캡슐 50mg 1캡슐")).toBeInTheDocument();
     expect(within(first!).getByText(/^복용 /)).toBeInTheDocument();
-    expect(within(first!).getByText(/다른 약을 비춤 1회 · 마지막: 무스판정/)).toBeInTheDocument();
+    expect(within(first!).queryByText(/다른 약을 비춤/)).not.toBeInTheDocument(); // [회귀] 웹이 mismatched를 보내지 않으므로 표시 안 함
     expect(within(first!).queryByText("직접 기록")).not.toBeInTheDocument(); // 카메라로 확인한 기록
     expect(within(second!).getByText("직접 기록")).toBeInTheDocument(); // 인식이 안 돼 직접 남긴 기록
     expect(fetch).toHaveBeenCalledWith("/api/medication?patientId=tanaka-haruko", { cache: "no-store" });
@@ -52,6 +52,24 @@ describe("MedicationStatus", () => {
     expect(await screen.findByText("저장했어요")).toBeInTheDocument();
     const post = vi.mocked(fetch).mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "POST")!;
     expect(JSON.parse(String((post[1] as RequestInit).body))).toEqual({ patientId: "tanaka-haruko", event: "reminder", time: "08:00", openAt: "07:50" });
+  });
+
+  it("[회귀] 환자가 바뀌면 고치던 시각을 지우고, 저장 중이던 이전 환자의 결과는 버린다", async () => {
+    let resolveSave: (response: Response) => void = () => {};
+    const other = { ...today, reminders: [{ time: "09:00", openAt: "09:00" }] };
+    vi.mocked(fetch).mockImplementation(async (url, init) => {
+      if ((init as RequestInit | undefined)?.method === "POST") return new Promise<Response>((resolve) => (resolveSave = resolve));
+      return new Response(JSON.stringify(String(url).includes("kim-minsu") ? other : today));
+    });
+    const { rerender } = render(<MedicationStatus patientId="tanaka-haruko" />);
+    const input = await screen.findByLabelText("08:00 복용 약 확인 자동 열림 시각");
+    fireEvent.change(input, { target: { value: "07:40" } });
+    fireEvent.click(within(input.closest("label")!).getByRole("button", { name: "저장" }));
+    rerender(<MedicationStatus patientId="kim-minsu" />);
+    expect(await screen.findByLabelText("09:00 복용 약 확인 자동 열림 시각")).toHaveValue("09:00");
+    await act(async () => resolveSave(new Response(JSON.stringify({ ...today, reminders: [{ time: "08:00", openAt: "07:40" }] }))));
+    expect(screen.queryByText("저장했어요")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("08:00 복용 약 확인 자동 열림 시각")).not.toBeInTheDocument(); // 이전 환자 결과로 덮어쓰지 않음
   });
 
   it("불러오지 못하면 그렇게 표시한다", async () => {

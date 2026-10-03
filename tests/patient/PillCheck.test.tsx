@@ -206,6 +206,44 @@ describe("알약 확인 모드", () => {
     });
   });
 
+  it("각인을 읽는 중에 약 확인을 닫았다 다시 열면 각인 확인을 다시 한다 (busy로 남지 않음)", async () => {
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    mockCamera();
+    vi.mocked(readCapsuleImprint).mockImplementationOnce(() => new Promise(() => {})); // 첫 번째는 끝나지 않음
+    const request = { medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() };
+    const { rerender } = render(<CameraIndicator patientId="tanaka-haruko" pillCheck={request} />);
+    await screen.findByRole("button", { name: "타이레놀정 500mg" });
+    await showPill("타이레놀정 500mg"); // 리리베아가 남아 있어 확정 전 각인 확인 (끝나지 않음)
+    await waitFor(() => expect(readCapsuleImprint).toHaveBeenCalledTimes(1));
+    rerender(<CameraIndicator patientId="tanaka-haruko" />); // 닫기
+    ocr.drugCode = tylenol.drugCode;
+    rerender(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ ...request }} />); // 다시 열기
+    await screen.findByRole("button", { name: "타이레놀정 500mg" });
+    await showPill("타이레놀정 500mg");
+    expect(await screen.findByText(/맞아요! 타이레놀정 500mg이에요/)).toBeInTheDocument();
+    expect(readCapsuleImprint).toHaveBeenCalledTimes(2);
+  });
+
+  it("약 확인을 닫았다 다시 열고 같은 약을 비추면 근거 사진을 새로 보여 준다", async () => {
+    let shot = 0;
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(() => `data:image/jpeg;base64,SHOT${(shot += 1)}`);
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(((_type: string, options?: unknown) =>
+      options ? null : { drawImage: vi.fn() }) as unknown as typeof HTMLCanvasElement.prototype.getContext);
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    mockCamera();
+    const request = { medications: [lyribea], debug: true, onClose: vi.fn(), onTaken: vi.fn() };
+    const { rerender } = render(<CameraIndicator patientId="tanaka-haruko" pillCheck={request} />);
+    await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
+    await showPill("리리베아캡슐 50mg");
+    expect(await screen.findByAltText("카메라로 본 약")).toBeInTheDocument();
+    rerender(<CameraIndicator patientId="tanaka-haruko" />);
+    rerender(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ ...request }} />);
+    await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
+    await showPill("리리베아캡슐 50mg");
+    expect(await screen.findByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
+    expect(await screen.findByAltText("카메라로 본 약")).toBeInTheDocument(); // 전에는 같은 약이라 다시 찍지 않아 사진이 없었음
+  });
+
   describe("흰 캡슐 (모델이 리리베아로 보지만 기준 0.75에 못 미침)", () => {
     async function showWhiteCapsule() {
       window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
@@ -405,7 +443,29 @@ describe("알약 확인 모드", () => {
     await waitFor(() => expect(tracks).toHaveLength(2)); // 한 번 다시 요청
     await act(async () => void tracks[1]!.dispatchEvent(new Event("ended")));
     await waitFor(() => expect(frontCalls(getUserMedia)).toBe(1)); // 전면으로 대신
+    // [회귀] 전면으로 대신하는 중에 다시 후면을 기다리거나 요청하지 않는다 (전면<->후면 반복 전환 방지)
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
     expect(tracks).toHaveLength(2);
+    expect(frontCalls(getUserMedia)).toBe(1);
+    expect(screen.getByLabelText("약 확인 카메라 미리보기").className).not.toMatch(/rearPreview/);
+  });
+
+  it("[회귀] 후면 카메라 권한이 거부되면 이 화면 동안 다시 요청하지 않고 전면으로 대신한다 (반복 전환 없음)", async () => {
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    const getUserMedia = vi.fn(async (constraints: MediaStreamConstraints) => {
+      if (wantsRear(constraints)) throw new DOMException("denied", "NotAllowedError");
+      return { getTracks: () => [{ stop: vi.fn() }] };
+    });
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+    renderPillCheck();
+    await screen.findByRole("button", { name: "리리베아캡슐 50mg" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    });
+    expect(getUserMedia.mock.calls.filter(([c]) => wantsRear(c as MediaStreamConstraints))).toHaveLength(1);
+    expect(frontCalls(getUserMedia)).toBe(1);
   });
 
   it("학습한 모델이 아직 없으면 준비 전이라고 안내한다", async () => {

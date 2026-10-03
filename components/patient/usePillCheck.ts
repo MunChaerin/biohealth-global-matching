@@ -118,6 +118,9 @@ export function usePillCheck(options: {
     heldRef.current = null;
     tracker.setTaken(takenRef.current);
     pendingRef.current = { ...PENDING_IDLE };
+    // 지난 확인에서 각인을 읽던 중에 정리됐으면 busy로 남아 다시 읽지 못하므로, 근거 사진 기록과 함께 처음 상태로
+    gateRef.current = { state: "idle", result: null };
+    evidenceCodeRef.current = null;
     setPhase("loading");
     setVerdict({ kind: "noPill" });
     setEvidence(null);
@@ -324,6 +327,8 @@ export function usePillCheck(options: {
       recognizer?.close();
       debugRecognizerRef.current = null;
       trackerRef.current = null;
+      gateRef.current = { state: "idle", result: null };
+      evidenceCodeRef.current = null;
     };
   }, [active, hasMedications, patientId, videoRef, correctedFrame, debug]);
 
@@ -333,6 +338,7 @@ export function usePillCheck(options: {
     heldRef.current = null;
     pendingRef.current = { ...PENDING_IDLE };
     gateRef.current = { state: "idle", result: null };
+    evidenceCodeRef.current = null;
     setEvidence(null);
     setImprintReading(false);
   }, [expectedKey]);

@@ -35,10 +35,10 @@ function readAutoOpened(patientId: string): string[] {
   }
 }
 
-function markAutoOpened(patientId: string, date: string, time: string, openAt: string) {
+function markAutoOpened(patientId: string, date: string, keys: readonly string[]) {
   try {
     const all = (JSON.parse(window.localStorage.getItem(AUTO_OPENED_KEY) ?? "[]") as string[]).filter((key) => key.includes(`|${date}|`)); // 지난 날짜는 지움
-    window.localStorage.setItem(AUTO_OPENED_KEY, JSON.stringify([...new Set([...all, `${patientId}|${openedKey(date, time, openAt)}`])]));
+    window.localStorage.setItem(AUTO_OPENED_KEY, JSON.stringify([...new Set([...all, ...keys.map((key) => `${patientId}|${key}`)])]));
   } catch {
     // 저장이 안 되면 이번 화면에서만 (다시 열릴 수 있음)
   }
@@ -73,7 +73,7 @@ export function PatientChat() {
         console.debug(`[약 확인 자동 열림] 지금 ${now} | ${plan}${due ? ` | ${due.time} 복용 약을 엽니다` : ""}`);
       }
       if (!due) return;
-      markAutoOpened(persona.id, today.date, due.time, due.openAt);
+      markAutoOpened(persona.id, today.date, due.markKeys); // 이미 지난 시간대도 함께 (닫은 뒤 지난 시간이 이어서 열리지 않게)
       setPillCheckGroup(due.items);
     };
     check();
@@ -207,7 +207,7 @@ export function PatientChat() {
                   if (!group.length) return;
                   // 직접 열었으면 그 시간에는 (지금 정해진 시각으로는) 자동으로 다시 열지 않음
                   const reminder = medication.today?.reminders.find((item) => item.time === group[0]!.time);
-                  if (medication.today && reminder) markAutoOpened(persona.id, medication.today.date, reminder.time, reminder.openAt);
+                  if (medication.today && reminder) markAutoOpened(persona.id, medication.today.date, [openedKey(medication.today.date, reminder.time, reminder.openAt)]);
                   setPillCheckGroup(group);
                 }} disabled={!group.length || !!pillCheckGroup}>{copy.taken}</button>}
           </div>

@@ -33,6 +33,13 @@ describe("약 확인 자동 열기", () => {
     expect(dueGroup(changed, "19:06", new Set([...opened, openedKey("2026-10-03", "08:00", "08:00")]))?.time).toBe("18:00");
   });
 
+  it("[회귀] 08:00을 놓친 채 19:00에 18:00 약을 열면 08:00도 열었음으로 남겨, 닫은 뒤 08:00이 이어서 열리지 않는다", () => {
+    const first = dueGroup(day(items), "19:00", new Set())!;
+    expect(first.time).toBe("18:00");
+    expect(first.markKeys).toEqual([openedKey("2026-10-03", "08:00", "08:00"), openedKey("2026-10-03", "18:00", "18:00")]);
+    expect(dueGroup(day(items), "19:00", new Set(first.markKeys))).toBeNull();
+  });
+
   it("의료진이 바꾼 시각을 따른다", () => {
     expect(dueGroup(day(items, [{ time: "08:00", openAt: "07:30" }, { time: "18:00", openAt: "18:00" }]), "07:31", new Set())?.time).toBe("08:00");
   });

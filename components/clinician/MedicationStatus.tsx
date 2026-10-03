@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { TodayMedication } from "../../lib/medication/intakeStore";
-import { pillName } from "../../lib/pill/catalog";
 import styles from "./clinician-dashboard.module.css";
 
 const POLL_INTERVAL_MS = 3_000;
@@ -18,8 +17,17 @@ export function MedicationStatus({ patientId }: { patientId: string }) {
   // 약 확인 자동 열림 시각: 고치는 중인 값 (복용 시간별), 저장 결과
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [saved, setSaved] = useState<{ time: string; ok: boolean } | null>(null);
+  const currentPatientRef = useRef(patientId);
+  currentPatientRef.current = patientId;
+
+  // 환자가 바뀌면 고치던 시각과 저장 결과를 지운다
+  useEffect(() => {
+    setDrafts({});
+    setSaved(null);
+  }, [patientId]);
 
   async function saveReminder(time: string, openAt: string) {
+    const savingFor = patientId;
     try {
       const response = await fetch("/api/medication", {
         method: "POST",
@@ -27,11 +35,13 @@ export function MedicationStatus({ patientId }: { patientId: string }) {
         body: JSON.stringify({ patientId, event: "reminder", time, openAt }),
       });
       if (!response.ok) throw new Error(String(response.status));
-      setToday((await response.json()) as TodayMedication);
+      const data = (await response.json()) as TodayMedication;
+      if (currentPatientRef.current !== savingFor) return; // 저장하는 사이 다른 환자로 바뀌면 결과를 버린다
+      setToday(data);
       setDrafts(({ [time]: _done, ...rest }) => rest);
       setSaved({ time, ok: true });
     } catch {
-      setSaved({ time, ok: false });
+      if (currentPatientRef.current === savingFor) setSaved({ time, ok: false });
     }
   }
 
@@ -76,12 +86,8 @@ export function MedicationStatus({ patientId }: { patientId: string }) {
                 <div>
                   <b>{item.name} {item.dose}</b>
                   <small>{item.appearance}</small>
-                  {item.mismatchCount > 0 ? (
-                    <small className={styles.medMismatch}>
-                      다른 약을 비춤 {item.mismatchCount}회
-                      {item.lastMismatch ? ` · 마지막: ${pillName(item.lastMismatch.detectedDrugCode, "ko")} (${formatTime(item.lastMismatch.at)})` : ""}
-                    </small>
-                  ) : null}
+                  {/* "다른 약을 비춤 N회"는 표시하지 않는다: 판정 범위를 이번 복용 시간의 약으로 좁힌 뒤로 웹은 일정 밖의 약을
+                      "잘 모르겠어요"(unknown)로 보내므로 mismatched가 오지 않는다. 서버 집계(mismatchCount)는 규격 호환을 위해 남겨 둔다. */}
                 </div>
                 <em>
                   {item.status === "taken" && item.takenAt ? `복용 ${formatTime(item.takenAt)}` : "미복용"}
