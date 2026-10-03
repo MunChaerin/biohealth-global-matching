@@ -61,6 +61,7 @@
 .pillActions:empty { display: none; }
 .pillTaken { flex: 1; padding: 14px; color: #fff; background: #2d8869; border: 0; border-radius: 12px; font-size: 16px; font-weight: 800; }
 .pillTaken:disabled { opacity: .6; }
+.pillCameraSize { position: absolute; right: 8px; bottom: 6px; padding: 1px 6px; color: #fff; background: rgba(0,0,0,.45); border-radius: 6px; font-size: 11px; }
 .pillAsk { display: flex; gap: 12px; align-items: center; }
 .pillAsk img { width: 120px; height: 120px; object-fit: cover; border-radius: 10px; border: 1px solid #c9ddd8; }
 .pillAsk div { display: flex; flex: 1; flex-direction: column; gap: 8px; }

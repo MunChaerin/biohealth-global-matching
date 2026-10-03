@@ -71,6 +71,24 @@ export type MouthAssistStatus = "waiting" | "ready" | "speaking" | "noFace";
  */
 export type ExpressionAnalysis = "on" | "paused" | "off";
 
+// 카메라 해상도. 표정 분석은 640x480이면 충분하지만, 알약 확인은 각인을 읽어야 해서 가능한 한 높게 받는다
+// (640x480에서는 알약을 얼굴 앞까지 가져와야 글씨가 보였음). 카메라를 새로 켜지 않고 쓰던 카메라의 설정만 바꾼다.
+const EXPRESSION_RESOLUTION = { width: { ideal: 640 }, height: { ideal: 480 } };
+const PILL_RESOLUTION = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+
+/** 카메라 해상도를 바꾸고 실제로 받은 크기를 돌려준다. 기기가 못 맞추면 되는 값으로 내려간다. */
+async function setResolution(stream: MediaStream, pill: boolean): Promise<{ width: number; height: number } | null> {
+  const track = stream.getVideoTracks?.()[0];
+  if (!track) return null;
+  try {
+    await track.applyConstraints?.(pill ? PILL_RESOLUTION : EXPRESSION_RESOLUTION);
+  } catch (error) {
+    console.warn("[카메라] 해상도를 바꾸지 못했습니다.", error);
+  }
+  const { width, height } = track.getSettings?.() ?? {};
+  return width && height ? { width, height } : null;
+}
+
 export function useFaceExpression(
   enabled: boolean,
   patientId: string = DEMO_PATIENT_ID,
@@ -84,6 +102,12 @@ export function useFaceExpression(
   analysisRef.current = analysis;
   // 알약 확인도 같은 밝기 보정을 쓰도록 바깥에 꺼내 둔다 (카메라가 켜져 있을 때만 값이 있음)
   const correctedFrameRef = useRef<((video: HTMLVideoElement) => HTMLVideoElement | HTMLCanvasElement) | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const [cameraSize, setCameraSize] = useState<{ width: number; height: number } | null>(null);
+  // analysis가 "on"이 아니면 알약 확인 중 (CameraIndicator 참고)
+  const pillMode = analysis !== "on";
+  const pillModeRef = useRef(pillMode);
+  pillModeRef.current = pillMode;
 
   useEffect(() => {
     if (!enabled) {
@@ -230,6 +254,14 @@ export function useFaceExpression(
         if (!cancelled) report(cameraErrorStatus(error), true);
         return;
       }
+      streamRef.current = stream;
+      if (pillModeRef.current) {
+        // 알약 확인을 하려고 카메라를 켠 경우: 처음부터 높은 해상도로
+        const size = await setResolution(stream, true);
+        if (cancelled) return;
+        setCameraSize(size);
+        if (size) console.info(`[카메라] 알약 확인 해상도 ${size.width}x${size.height}`);
+      }
       if (analysisRef.current === "on") report("calibrating", true);
       tick();
     }
@@ -239,11 +271,28 @@ export function useFaceExpression(
     return () => {
       cancelled = true;
       correctedFrameRef.current = null;
+      streamRef.current = null;
+      setCameraSize(null);
       if (timer) clearTimeout(timer);
       stream?.getTracks().forEach((track) => track.stop());
       landmarker?.close();
     };
   }, [enabled, patientId, onMouthStatus]);
 
-  return { videoRef, status, previewFilter, correctedFrame: correctedFrameRef };
+  // 알약 확인을 시작·종료하면 해상도만 바꾼다 (카메라는 그대로)
+  useEffect(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    let cancelled = false;
+    void setResolution(stream, pillMode).then((size) => {
+      if (cancelled) return;
+      setCameraSize(size);
+      if (size) console.info(`[카메라] ${pillMode ? "알약 확인" : "표정 관찰"} 해상도 ${size.width}x${size.height}`);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pillMode]);
+
+  return { videoRef, status, previewFilter, correctedFrame: correctedFrameRef, cameraSize };
 }

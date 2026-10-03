@@ -219,6 +219,31 @@ describe("알약 확인 모드", () => {
     expect(vi.mocked(fetch).mock.calls.some(([url]) => url === "/api/camera")).toBe(false);
   });
 
+  it("알약 확인 중에는 카메라 해상도를 높이고(카메라는 그대로), 끝나면 표정 관찰용으로 되돌린다", async () => {
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    let settings = { width: 640, height: 480 };
+    const track = {
+      stop: vi.fn(),
+      applyConstraints: vi.fn(async (c: { width: { ideal: number } }) => {
+        settings = c.width.ideal === 1920 ? { width: 1920, height: 1080 } : { width: 640, height: 480 };
+      }),
+      getSettings: () => settings,
+    };
+    const getUserMedia = vi.fn().mockResolvedValue({ getTracks: () => [track], getVideoTracks: () => [track] });
+    Object.defineProperty(navigator, "mediaDevices", { value: { getUserMedia }, configurable: true });
+
+    const { rerender } = render(<CameraIndicator patientId="tanaka-haruko" />);
+    await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
+    rerender(<CameraIndicator patientId="tanaka-haruko" pillCheck={{ medications: morning, debug: true, onClose: vi.fn(), onTaken: vi.fn() }} />);
+    expect(await screen.findByText("1920x1080")).toBeInTheDocument();
+    expect(track.applyConstraints).toHaveBeenLastCalledWith({ width: { ideal: 1920 }, height: { ideal: 1080 } });
+
+    rerender(<CameraIndicator patientId="tanaka-haruko" />);
+    await waitFor(() => expect(track.applyConstraints).toHaveBeenLastCalledWith({ width: { ideal: 640 }, height: { ideal: 480 } }));
+    expect(getUserMedia).toHaveBeenCalledTimes(1); // 카메라를 새로 켜지 않음
+    expect(track.stop).not.toHaveBeenCalled();
+  });
+
   it("학습한 모델이 아직 없으면 준비 전이라고 안내한다", async () => {
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();

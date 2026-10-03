@@ -78,7 +78,7 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
   const remainingPills = pillGroup.filter((item) => !takenIds.includes(item.id));
   const cameraEnabled = consent === "on" || (pillMode && pillCameraAllowed);
   const analysis: ExpressionAnalysis = pillMode ? (consent === "on" ? "paused" : "off") : "on";
-  const { videoRef, status, previewFilter, correctedFrame } = useFaceExpression(cameraEnabled, patientId, setMouthStatus, analysis);
+  const { videoRef, status, previewFilter, correctedFrame, cameraSize } = useFaceExpression(cameraEnabled, patientId, setMouthStatus, analysis);
   const cameraWorking = cameraEnabled && status !== "off" && status !== "starting" && status !== "permissionDenied" && status !== "unavailable";
   const pill = usePillCheck({
     active: pillMode && cameraWorking,
@@ -147,6 +147,10 @@ export function CameraIndicator({ language = "ko", patientId = DEMO_PATIENT_ID, 
         />
         {/* 알약은 이 네모 안만 본다 (lib/pill/zoom.ts GUIDE_FRACTION과 같은 크기) */}
         {pillMode && showVideo ? <div className={styles.pillGuide} aria-hidden="true" /> : null}
+        {/* 개발 중: 기기에서 실제로 받은 카메라 해상도 (예: 아이패드에서 몇이 나오는지 확인용) */}
+        {pillMode && showVideo && cameraSize && process.env.NODE_ENV !== "production" ? (
+          <small className={styles.pillCameraSize}>{cameraSize.width}x{cameraSize.height}</small>
+        ) : null}
       </div>
 
       {pillCheck ? (
