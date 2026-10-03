@@ -33,8 +33,14 @@ describe("PillVerdictTracker", () => {
     expect(tracker.update(STABLE_MS, [amlodipine()])).toMatchObject({ kind: "match", drugCode: "A", confidence: expect.any(Number) });
   });
 
-  it("다른 약은 확신 0.9 이상이 3초 이어져야 다른 약으로 판정한다", () => {
+  it("일정 밖의 약은 확신이 높아도 다른 약이라고 하지 않고 잘 모르겠어요", () => {
     const tracker = new PillVerdictTracker("A");
+    for (let t = 0; t <= 5_000; t += 250) expect(tracker.update(t, [metformin(0.95)]).kind).toBe("unsure");
+  });
+
+  it("이번 시간에 이미 먹은 약은 확신 0.9 이상이 3초 이어져야 다시 비췄다고 판정한다", () => {
+    const tracker = new PillVerdictTracker("A");
+    tracker.setTaken(["B"]);
     expect(tracker.update(0, [metformin(0.86)]).kind).toBe("unsure"); // 웹캠 테스트에서 가끔 닿던 값
     tracker.update(0, [metformin()]);
     expect(tracker.update(STABLE_MS, [metformin()]).kind).toBe("checking");
@@ -49,8 +55,9 @@ describe("PillVerdictTracker", () => {
     expect(tracker.update(100 + STABLE_MS, [amlodipine(0.85)]).kind).toBe("match");
   });
 
-  it("다른 약이 0.9보다 약하면 다른 약이라고 하지 않고 잘 모르겠어요 (배경 착각 방지)", () => {
+  it("이미 먹은 약도 0.9보다 약하면 잘 모르겠어요", () => {
     const tracker = new PillVerdictTracker("A");
+    tracker.setTaken(["B"]);
     for (let t = 0; t <= 5_000; t += 250) expect(tracker.update(t, [metformin(0.75)]).kind).toBe("unsure");
   });
 
@@ -77,6 +84,7 @@ describe("PillVerdictTracker", () => {
     tracker.update(0, [metformin()]);
     expect(tracker.update(STABLE_MS, [metformin()])).toMatchObject({ kind: "match", drugCode: "B" });
     tracker.setExpected(["A"]); // B를 먹음
+    tracker.setTaken(["B"]);
     expect(tracker.update(STABLE_MS + 100, [metformin()]).kind).toBe("checking");
     expect(tracker.update(STABLE_MS + 100 + MISMATCH_STABLE_MS, [metformin()])).toMatchObject({ kind: "mismatch", drugCode: "B" });
   });

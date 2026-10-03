@@ -26,7 +26,7 @@ interface MedicationEventBody {
 }
 
 // event:
-//   "taken"       [먹었어요] - method "camera"(카메라로 맞는 약 확인 후) | "manual"(인식이 안 돼 직접 기록)
+//   "taken"       [먹었어요] - method "camera"(모델이 맞는 약으로 판정) | "confirmed"(사진을 보고 환자가 확인) | "manual"(직접 기록)
 //   "recognition" 알약 인식 결과 PillRecognitionResult (사진·영상 없이 판정 결과만)
 export async function POST(request: Request) {
   if (!demoModeEnabled()) return demoGuard(null)!;
@@ -48,8 +48,8 @@ export async function POST(request: Request) {
 
   if (body.event === "taken") {
     const method = body.method ?? "camera";
-    if (method !== "camera" && method !== "manual") {
-      return NextResponse.json({ error: "method는 camera 또는 manual이어야 합니다." }, { status: 400 });
+    if (method !== "camera" && method !== "confirmed" && method !== "manual") {
+      return NextResponse.json({ error: "method는 camera, confirmed, manual 중 하나여야 합니다." }, { status: 400 });
     }
     recordTaken(patientId!, body.medicationId, method);
   } else if (body.event === "recognition") {

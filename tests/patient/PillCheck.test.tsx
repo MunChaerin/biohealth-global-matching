@@ -131,7 +131,7 @@ describe("알약 확인 모드", () => {
     expect(matched[0].result).toMatchObject({ patientId: "tanaka-haruko", expectedMedicationCode: tylenol.drugCode, confidence: 0.92, modelVersion: "debug" });
   });
 
-  it("맞는 약으로 한 번 판정되면 약이 안 보이거나 애매해져도 [먹었어요]를 유지하고, 다른 약이면 없앤다", async () => {
+  it("맞는 약으로 한 번 판정되면 약이 안 보이거나 애매해져도 [먹었어요]를 유지하고, 다른 약이 확실히 보이면 없앤다", async () => {
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();
     renderPillCheck();
@@ -146,8 +146,8 @@ describe("알약 확인 모드", () => {
     expect(screen.getByRole("button", { name: "먹었어요" })).toBeInTheDocument();
 
     await showPill("다른 약");
-    expect(await screen.findByText(/이 약은 무스판정이에요/)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument());
+    expect(screen.queryByText(/무스판정/)).not.toBeInTheDocument(); // 일정 밖의 약 이름은 말하지 않음
   });
 
   describe("흰 캡슐 (모델이 리리베아로 보지만 기준 0.8에 못 미침)", () => {
@@ -170,31 +170,36 @@ describe("알약 확인 모드", () => {
       expect(readCapsuleImprint).toHaveBeenCalledTimes(1); // 매 프레임 읽지 않음
     });
 
-    it("독립목클린 각인이면 다른 약", async () => {
+    it("일정 밖의 약(독립목클린) 각인이어도 '다른 약'이라 하지 않고 사진으로 묻는다", async () => {
       ocr.drugCode = "K-045269";
       await showWhiteCapsule();
-      expect(await screen.findByText(/이 약은 독립목클린캡슐이에요. 지금 드실 약이 아니에요./)).toBeInTheDocument();
+      expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+      expect(screen.queryByText(/독립목클린/)).not.toBeInTheDocument();
       expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
     });
 
-    it("각인으로 못 정하면 사진을 보여 주고 묻고, [맞아요]면 맞는 약", async () => {
+    it("각인으로 못 정하면 사진을 보여 주고 고르게 하고, 고른 약은 사진 확인(confirmed)으로 기록", async () => {
       ocr.drugCode = null;
       await showWhiteCapsule();
-      expect(await screen.findByText("캡슐에 DWB PGN 50 글자가 보이나요? 사진을 보고 알려 주세요.")).toBeInTheDocument();
-      fireEvent.click(screen.getByRole("button", { name: "맞아요" }));
+      expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /리리베아캡슐 50mg각인/ })); // 개발용 버튼과 구분
       expect(await screen.findByText(/맞아요! 리리베아캡슐 50mg이에요/)).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: "먹었어요" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "먹었어요" }));
+      await waitFor(() => expect(medicationPosts("taken")).toEqual([{ patientId: "tanaka-haruko", medicationId: lyribea.id, event: "taken", method: "confirmed" }]));
+      // 사람이 정한 것은 모델 판정(matched)으로 보내지 않는다
+      expect(medicationPosts("recognition").some((body) => body.result.status === "matched")).toBe(false);
     });
   });
 
-  it("다른 약이면 안내하고, 같은 약을 계속 비춰도 의료진 기록은 한 번만 남긴다", async () => {
+  it("일정 밖의 약은 '다른 약'이라 하지 않고 사진으로 묻고, 의료진 기록은 unknown 한 번만", async () => {
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();
     renderPillCheck();
     await screen.findByRole("button", { name: "다른 약" });
 
     await showPill("다른 약");
-    expect(await screen.findByText(/이 약은 무스판정이에요. 지금 드실 약이 아니에요./)).toBeInTheDocument();
+    expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+    expect(screen.queryByText(/무스판정/)).not.toBeInTheDocument();
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 600));
     });
@@ -202,7 +207,7 @@ describe("알약 확인 모드", () => {
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
       medicationId: lyribea.id,
-      result: { status: "mismatched", medicationCode: "K-005849", expectedMedicationCode: lyribea.drugCode, confidence: 0.9 },
+      result: { status: "unknown", medicationCode: "K-005849", expectedMedicationCode: lyribea.drugCode, confidence: 0.9 },
     });
     expect(screen.queryByRole("button", { name: "먹었어요" })).not.toBeInTheDocument();
   });

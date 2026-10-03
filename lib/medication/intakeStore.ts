@@ -4,7 +4,9 @@ import { getMedicationSchedule, type MedicationItem } from "./schedule";
 // 오늘 복약 기록. 지금은 서버 메모리 (카메라 결과처럼 데모용 - 서버 재시작 시 사라짐).
 // 날짜는 한국·일본 시간(UTC+9) 기준으로 나눈다.
 
-export type IntakeMethod = "camera" | "manual"; // 카메라로 약을 확인하고 기록 / 인식이 안 돼서 직접 기록
+// camera: 모델이 맞는 약으로 판정한 뒤 기록 / confirmed: 모델이 애매해서 확대 사진을 보고 환자가 [맞아요]로 정한 뒤 기록
+// manual: 카메라·모델을 쓸 수 없어 직접 기록
+export type IntakeMethod = "camera" | "confirmed" | "manual";
 
 export interface IntakeRecord {
   takenAt?: string; // [먹었어요]를 누른 시각

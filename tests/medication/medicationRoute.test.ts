@@ -64,6 +64,11 @@ describe("/api/medication", () => {
     expect(item?.method).toBe("manual");
   });
 
+  it("사진을 보고 환자가 확인한 기록은 method가 confirmed로 남는다", async () => {
+    expect((await post({ patientId, medicationId: "tanaka-tylenol-am", event: "taken", method: "confirmed" })).status).toBe(200);
+    expect((await today()).body.items.find((item) => item.id === "tanaka-tylenol-am")?.method).toBe("confirmed");
+  });
+
   it("인식 결과(PillRecognitionResult)를 받아 다른 약을 비춘 횟수와 마지막 결과를 기록한다", async () => {
     await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: recognition("mismatched", "K-004378") });
     await post({ patientId, medicationId: "tanaka-lyribea-am", event: "recognition", result: recognition("unknown", null, { confidence: null }) });

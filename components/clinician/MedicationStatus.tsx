@@ -67,6 +67,7 @@ export function MedicationStatus({ patientId }: { patientId: string }) {
                 <em>
                   {item.status === "taken" && item.takenAt ? `복용 ${formatTime(item.takenAt)}` : "미복용"}
                   {item.status === "taken" && item.method === "manual" ? <span className={styles.medManual}>직접 기록</span> : null}
+                  {item.status === "taken" && item.method === "confirmed" ? <span className={styles.medManual}>사진 확인</span> : null}
                 </em>
               </li>
             ))}
@@ -75,7 +76,7 @@ export function MedicationStatus({ patientId }: { patientId: string }) {
           <p className={styles.facialEmpty}>등록된 복약 일정이 없습니다.</p>
         )
       ) : null}
-      <small className={styles.facialFoot}>환자가 카메라로 약을 확인한 뒤 직접 누른 기록이에요. "직접 기록"은 카메라로 확인하지 못하고 환자가 직접 남긴 기록이에요. 실제 복용은 의료진이 확인해 주세요.</small>
+      <small className={styles.facialFoot}>환자가 카메라로 약을 확인한 뒤 직접 누른 기록이에요. "사진 확인"은 모델이 애매해서 확대 사진을 보고 환자가 맞다고 고른 기록, "직접 기록"은 카메라로 확인하지 못하고 환자가 직접 남긴 기록이에요. 실제 복용은 의료진이 확인해 주세요.</small>
     </section>
   );
 }

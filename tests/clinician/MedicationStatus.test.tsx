@@ -33,6 +33,13 @@ describe("MedicationStatus", () => {
     expect(fetch).toHaveBeenCalledWith("/api/medication?patientId=tanaka-haruko", { cache: "no-store" });
   });
 
+  it("사진을 보고 환자가 확인한 기록은 '사진 확인'으로 표시한다", async () => {
+    const confirmed = { ...today, items: [{ ...today.items[0]!, method: "confirmed" as const }] };
+    vi.mocked(fetch).mockImplementation(async () => new Response(JSON.stringify(confirmed)));
+    render(<MedicationStatus patientId="tanaka-haruko" />);
+    expect(await screen.findByText("사진 확인")).toBeInTheDocument();
+  });
+
   it("불러오지 못하면 그렇게 표시한다", async () => {
     vi.mocked(fetch).mockImplementation(async () => new Response("{}", { status: 500 }));
     render(<MedicationStatus patientId="tanaka-haruko" />);

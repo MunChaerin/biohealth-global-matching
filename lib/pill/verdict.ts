@@ -28,7 +28,7 @@ export type PillVerdict =
   | { kind: "multiple" } // 여러 알이 보임 -> 한 알씩
   | { kind: "unsure" } // 어떤 약인지 확신이 낮음
   | { kind: "checking"; drugCode: string } // 같은 약이 보이는 중, 판정 대기
-  | { kind: "match"; drugCode: string; confidence?: number; box?: PillDetection["box"] } // box: 화면에서 알약을 확대해 보여줄 때 사용
+  | { kind: "match"; drugCode: string; confidence?: number; box?: PillDetection["box"]; byPerson?: boolean } // box: 확대 사진용, byPerson: 사진을 보고 환자가 [맞아요]로 정함
   | { kind: "mismatch"; drugCode: string; confidence?: number; box?: PillDetection["box"] };
 
 /** 알약으로 셀 검출만 남긴다 (확신 높은 순). 0.83 옆의 0.48처럼 많이 약한 박스는 버린다. */
@@ -48,9 +48,16 @@ export function readDetections(detections: readonly PillDetection[]): PillReadin
   return { kind: "pill", drugCode: pill!.drugCode, confidence: pill!.confidence, box: pill!.box };
 }
 
+/**
+ * 판정 범위는 "이번 복용 시간의 약"이다.
+ * - 아직 안 먹은 약(expected)이면 맞음
+ * - 이번 시간에 이미 먹은 약(taken)이면 "방금 드셨어요" (다른 약 판정, 0.9·3초)
+ * - 그 밖의 클래스는 "다른 약"이라고 하지 않고 "잘 모르겠어요" (일정 밖의 약을 학습한 10종 중 하나로 억지로 부르지 않음)
+ */
 export class PillVerdictTracker {
   private candidate: { drugCode: string; since: number } | null = null;
   private expected: Set<string>;
+  private taken = new Set<string>();
   // 약별 "맞는 약" 기준 (model-metadata.json thresholds.classConfidence). 글자 없는 면이 다른 약과 똑같아
   // 그 약을 이 약으로 높게 확신하는 경우가 있는 약만 더 높게 둔다 (예: 리리베아 0.8 - 독립목클린 뒷면을 0.7대로 리리베아라고 봄).
   private classConfidence: Readonly<Record<string, number>> = {};
@@ -66,6 +73,11 @@ export class PillVerdictTracker {
     this.candidate = null;
   }
 
+  /** 이번 복용 시간에 이미 먹은 약 (다시 비추면 "방금 드셨어요") */
+  setTaken(taken: readonly string[]): void {
+    this.taken = new Set(taken);
+  }
+
   setClassConfidence(classConfidence: Readonly<Record<string, number>>): void {
     this.classConfidence = classConfidence;
   }
@@ -77,6 +89,10 @@ export class PillVerdictTracker {
       return reading;
     }
     const expected = this.expected.has(reading.drugCode);
+    if (!expected && !this.taken.has(reading.drugCode)) {
+      this.candidate = null;
+      return { kind: "unsure" };
+    }
     const needed = expected ? (this.classConfidence[reading.drugCode] ?? CONFIDENT) : MISMATCH_CONFIDENT;
     if (reading.confidence < needed) {
       this.candidate = null;

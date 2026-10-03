@@ -6,7 +6,8 @@ import { DebugPillRecognizer, loadPillRecognizer, type PillRecognizer } from "..
 import type { PillRecognitionResult } from "../../lib/pill/result";
 import { describeDetections, detectWithZoom } from "../../lib/pill/zoom";
 import { pillName } from "../../lib/pill/catalog";
-import { PillVerdictTracker, STABLE_MS, pillsInFrame, type PillDetection, type PillVerdict } from "../../lib/pill/verdict";
+import { CONFIDENT, PillVerdictTracker, STABLE_MS, pillsInFrame, type PillDetection, type PillVerdict } from "../../lib/pill/verdict";
+import type { IntakeMethod } from "../../lib/medication/intakeStore";
 import { WHITE_CAPSULES, cropGray, readCapsuleImprint } from "../../lib/pill/capsuleOcr";
 
 const DETECT_INTERVAL_MS = 250;
@@ -36,10 +37,16 @@ function cropEvidence(frame: HTMLVideoElement | HTMLCanvasElement, box: readonly
 
 export type PillCheckPhase = "loading" | "notReady" | "error" | "running";
 
-/** 흰 캡슐 각인 확인 상태: 읽는 중 / 각인으로 못 정해서 환자에게 사진을 보여 주고 묻는 중 */
-export type CapsuleCheck =
+const ASK_AFTER_MS = 2_000; // 네모 안에 알약이 한 알 보이는데 이만큼 판정이 안 나면 사진을 보여 주고 묻는다
+
+/**
+ * 모델이 애매할 때의 확인 상태.
+ * reading: 흰 캡슐 각인을 읽는 중 / ask: 확대 사진을 보여 주고 이번 시간의 약 중 어느 것인지 환자에게 묻는 중
+ * candidates는 아직 안 먹은 약 코드 (모델이 가장 높게 본 약이 앞)
+ */
+export type PillAsk =
   | { kind: "reading" }
-  | { kind: "ask"; drugCode: string; image: string | null; confidence: number; box?: PillDetection["box"] };
+  | { kind: "ask"; candidates: string[]; image: string | null; confidence: number; box?: PillDetection["box"] };
 
 type HeldVerdict = Extract<PillVerdict, { kind: "match" | "mismatch" }>;
 
@@ -63,8 +70,9 @@ async function postMedicationEvent(body: Record<string, unknown>): Promise<boole
  * 한 번만 인식 결과(PillRecognitionResult, 사진 없음)를 서버에 보낸다. 방금 먹은 약을 다시 비춘 경우는 보내지 않는다.
  * 맞는 약으로 한 번 판정되면 [먹었어요]를 누르거나 다른 약으로 판정되기 전까지 그 판정을 유지한다
  * (손에 든 알약이 잠깐 안 잡혀도 [먹었어요] 버튼이 사라지지 않게).
- * 흰 캡슐(리리베아·독립목클린)은 글자 없는 면이 똑같아 모델이 헷갈리므로, 모델이 둘 중 하나로 보는 상태가
- * 1초 이어지면 확대 사진의 각인을 OCR로 한 번만 읽어 정한다. 각인으로도 못 정하면 사진을 보여 주고 환자에게 묻는다.
+ * 판정 범위는 이번 복용 시간의 약이다 (일정 밖의 클래스는 "다른 약"이 아니라 "잘 모르겠어요").
+ * 모델이 애매하면(네모 안에 한 알이 보이는데 2초 동안 판정이 안 나면) 확대 사진을 보여 주고 환자에게 묻는 게 기본 흐름이다.
+ * 흰 캡슐(리리베아·독립목클린)로 보이면 묻기 전에 각인을 OCR로 한 번 읽어 보고, 못 정하면 묻는다.
  * debug면 모델 대신 버튼으로 보이는 약을 정한다 (?pillDebug=1, 모델 학습 전 화면 흐름 확인용).
  */
 export function usePillCheck(options: {
@@ -85,9 +93,10 @@ export function usePillCheck(options: {
   const trackerRef = useRef<PillVerdictTracker | null>(null);
   // 유지 중인 판정: 맞는 약(먹었어요를 누르거나 다른 약이 보일 때까지) 또는 각인으로 정한 다른 약(약을 내려놓을 때까지)
   const heldRef = useRef<HeldVerdict | null>(null);
-  // 흰 캡슐 각인 읽기: 모델이 흰 캡슐로 본 시각, 이번에 읽었는지 (약을 내려놓으면 다시 읽을 수 있음)
-  const ocrRef = useRef<{ since: number | null; state: "idle" | "busy" | "done" }>({ since: null, state: "idle" });
-  const [capsule, setCapsule] = useState<CapsuleCheck | null>(null);
+  // 애매한 상태: 한 알이 보이기 시작한 시각, 이번에 각인 읽기·묻기를 했는지 (약을 내려놓으면 다시 할 수 있음)
+  const askRef = useRef<{ since: number | null; state: "idle" | "busy" | "done" }>({ since: null, state: "idle" });
+  const [ask, setAsk] = useState<PillAsk | null>(null);
+  const takenKey = takenCodes.join(",");
   const expectedKey = medications.map((item) => item.drugCode).join(",");
   const hasMedications = medications.length > 0;
   const [phase, setPhase] = useState<PillCheckPhase>("loading");
@@ -108,24 +117,32 @@ export function usePillCheck(options: {
     const tracker = new PillVerdictTracker(medicationsRef.current.map((item) => item.drugCode));
     trackerRef.current = tracker;
     heldRef.current = null;
-    ocrRef.current = { since: null, state: "idle" };
+    tracker.setTaken(takenRef.current);
+    askRef.current = { since: null, state: "idle" };
     setPhase("loading");
     setVerdict({ kind: "noPill" });
     setEvidence(null);
-    setCapsule(null);
+    setAsk(null);
 
-    /** 각인을 읽은 결과로 판정한다. 못 정하면 남은 약에 흰 캡슐이 있을 때만 환자에게 묻는다. */
+    /** 확대 사진을 보여 주고 이번 시간의 남은 약 중 어느 것인지 묻는다 (모델이 가장 높게 본 약이 앞). */
+    function askPerson(seen: PillDetection, image: string | null) {
+      const codes = medicationsRef.current.map((item) => item.drugCode);
+      if (!codes.length) return setAsk(null);
+      const candidates = codes.includes(seen.drugCode) ? [seen.drugCode, ...codes.filter((code) => code !== seen.drugCode)] : codes;
+      setAsk({ kind: "ask", candidates, image, confidence: seen.confidence, box: seen.box });
+    }
+
+    /** 각인을 읽은 결과: 남은 약이면 맞음, 방금 먹은 약이면 "방금 드셨어요", 그 밖(못 정함·일정 밖)은 사진으로 묻는다. */
     function applyImprint(drugCode: string | null, seen: PillDetection, image: string | null) {
-      const remaining = medicationsRef.current;
-      if (drugCode) {
-        heldRef.current = remaining.some((item) => item.drugCode === drugCode)
-          ? { kind: "match", drugCode, confidence: seen.confidence, box: seen.box }
-          : { kind: "mismatch", drugCode, confidence: seen.confidence, box: seen.box };
-        setCapsule(null);
-        return;
+      if (drugCode && medicationsRef.current.some((item) => item.drugCode === drugCode)) {
+        heldRef.current = { kind: "match", drugCode, confidence: seen.confidence, box: seen.box };
+        setAsk(null);
+      } else if (drugCode && takenRef.current.includes(drugCode)) {
+        heldRef.current = { kind: "mismatch", drugCode, confidence: seen.confidence, box: seen.box };
+        setAsk(null);
+      } else {
+        askPerson(seen, image);
       }
-      const expectedWhite = remaining.find((item) => WHITE_CAPSULES.includes(item.drugCode));
-      setCapsule(expectedWhite ? { kind: "ask", drugCode: expectedWhite.drugCode, image, confidence: seen.confidence, box: seen.box } : null);
     }
 
     async function tick() {
@@ -150,35 +167,49 @@ export function usePillCheck(options: {
         else if (reading.kind === "mismatch") heldRef.current = null;
         else if (reading.kind === "noPill" && heldRef.current?.kind === "mismatch") heldRef.current = null;
 
-        // 흰 캡슐: 모델이 리리베아·독립목클린으로 보는 상태가 1초 이어지면 각인을 한 번만 읽는다
+        // 애매한 한 알: 흰 캡슐이면 1초 뒤 각인을 한 번 읽고, 아니면 2초 뒤 사진을 보여 주고 묻는다
         const pills = pillsInFrame(detections);
-        const white = pills.length === 1 && WHITE_CAPSULES.includes(pills[0]!.drugCode) && pills[0]!.box ? pills[0]! : null;
-        const ocr = ocrRef.current;
+        const single = pills.length === 1 && pills[0]!.box ? pills[0]! : null;
+        const pending = askRef.current;
         const now = performance.now();
-        if (white && reading.kind !== "match" && heldRef.current?.kind !== "match") {
-          ocr.since ??= now;
-          if (ocr.state === "idle" && now - ocr.since >= STABLE_MS) {
-            ocr.state = "busy";
-            setCapsule({ kind: "reading" });
-            const crop = cropGray(frame, white.box!);
-            const image = cropEvidence(frame, white.box!);
-            (crop ? readCapsuleImprint(crop) : Promise.resolve({ drugCode: null, texts: [] }))
-              .then((result) => {
-                if (cancelled) return;
-                console.info(`[알약 인식] 캡슐 각인 OCR: ${JSON.stringify(result.texts)} -> ${result.drugCode ? pillName(result.drugCode, "ko") : "못 정함"}`);
-                ocr.state = "done";
-                applyImprint(result.drugCode, white, image);
-              })
-              .catch((error) => {
-                if (cancelled) return;
-                console.error("capsule OCR error", error);
-                ocr.state = "done";
-                applyImprint(null, white, image);
-              });
+        const held = heldRef.current;
+        // 맞는 약으로 유지 중인데 다른 약이 확실히(0.6 이상) 1초 넘게 보이면 유지를 푼다 (다른 약을 들고 [먹었어요]를 누르지 않게)
+        if (held?.kind === "match" && single && single.drugCode !== held.drugCode && single.confidence >= CONFIDENT) {
+          pending.since ??= now;
+          if (now - pending.since >= STABLE_MS) heldRef.current = null;
+        }
+        if (reading.kind === "match" || reading.kind === "mismatch") setAsk(null); // 모델이 정했으면 묻지 않는다
+        // 방금 먹은 약을 다시 비춘 경우는 묻지 않는다 ("방금 드셨어요" 판정을 기다림)
+        if (single && !takenRef.current.includes(single.drugCode) && reading.kind !== "match" && reading.kind !== "mismatch" && heldRef.current === null) {
+          pending.since ??= now;
+          const white = WHITE_CAPSULES.includes(single.drugCode);
+          if (pending.state === "idle" && now - pending.since >= (white ? STABLE_MS : ASK_AFTER_MS)) {
+            pending.state = "busy";
+            const image = cropEvidence(frame, single.box!);
+            if (white) {
+              setAsk({ kind: "reading" });
+              const crop = cropGray(frame, single.box!);
+              (crop ? readCapsuleImprint(crop) : Promise.resolve({ drugCode: null, texts: [] }))
+                .then((result) => {
+                  if (cancelled) return;
+                  console.info(`[알약 인식] 캡슐 각인 OCR: ${JSON.stringify(result.texts)} -> ${result.drugCode ? pillName(result.drugCode, "ko") : "못 정함"}`);
+                  pending.state = "done";
+                  applyImprint(result.drugCode, single, image);
+                })
+                .catch((error) => {
+                  if (cancelled) return;
+                  console.error("capsule OCR error", error);
+                  pending.state = "done";
+                  askPerson(single, image);
+                });
+            } else {
+              pending.state = "done";
+              askPerson(single, image);
+            }
           }
-        } else {
-          ocr.since = null;
-          if (reading.kind === "noPill" && ocr.state === "done") ocr.state = "idle"; // 내려놓았다가 다시 비추면 다시 읽음
+        } else if (!(held?.kind === "match" && single && single.drugCode !== held.drugCode)) {
+          pending.since = null;
+          if (reading.kind === "noPill" && pending.state === "done") pending.state = "idle"; // 내려놓았다가 다시 비추면 다시 함
         }
 
         const next = heldRef.current ?? reading;
@@ -202,7 +233,8 @@ export function usePillCheck(options: {
         } else {
           unsureSince = null;
         }
-        if (next.kind === "match") {
+        if (next.kind === "match" && !next.byPerson) {
+          // 사람이 사진을 보고 정한 경우는 모델 판정(matched)으로 보내지 않는다 (애매한 상태는 이미 unknown으로 보냄)
           const item = remaining.find((candidate) => candidate.drugCode === next.drugCode);
           if (item) result = { status: "matched", code: next.drugCode, confidence: next.confidence ?? null, item };
         } else if (next.kind === "mismatch" && !takenRef.current.includes(next.drugCode) && remaining[0]) {
@@ -265,22 +297,26 @@ export function usePillCheck(options: {
   useEffect(() => {
     trackerRef.current?.setExpected(expectedKey ? expectedKey.split(",") : []);
     heldRef.current = null;
-    ocrRef.current = { since: null, state: "idle" };
+    askRef.current = { since: null, state: "idle" };
     setEvidence(null);
-    setCapsule(null);
+    setAsk(null);
   }, [expectedKey]);
 
-  /** [먹었어요] - 맞는 약으로 판정됐을 때(camera) 또는 인식이 안 돼 직접 확인했을 때(manual) 복용으로 기록한다. */
-  async function confirmTaken(item: MedicationItem, method: "camera" | "manual" = "camera"): Promise<boolean> {
+  useEffect(() => {
+    trackerRef.current?.setTaken(takenKey ? takenKey.split(",") : []);
+  }, [takenKey]);
+
+  /** [먹었어요] - 모델이 판정(camera), 사진을 보고 환자가 확인(confirmed), 인식이 안 돼 직접 기록(manual) */
+  async function confirmTaken(item: MedicationItem, method: IntakeMethod = "camera"): Promise<boolean> {
     return postMedicationEvent({ patientId, medicationId: item.id, event: "taken", method });
   }
 
-  /** 각인으로 못 정해 환자에게 물었을 때의 답. [맞아요]면 그 약으로 판정한다. */
-  function answerCapsule(yes: boolean) {
-    const asked = capsule?.kind === "ask" ? capsule : null;
-    setCapsule(null);
-    if (!yes || !asked) return;
-    const held: HeldVerdict = { kind: "match", drugCode: asked.drugCode, confidence: asked.confidence, box: asked.box };
+  /** 사진을 보고 환자가 고른 약 (null = 아니에요). 고르면 그 약으로 판정하고 [먹었어요]를 보여 준다. */
+  function answerAsk(drugCode: string | null) {
+    const asked = ask?.kind === "ask" ? ask : null;
+    setAsk(null);
+    if (!drugCode || !asked) return;
+    const held: HeldVerdict = { kind: "match", drugCode, confidence: asked.confidence, box: asked.box, byPerson: true };
     heldRef.current = held;
     setVerdict(held);
   }
@@ -290,5 +326,5 @@ export function usePillCheck(options: {
     if (debugRecognizerRef.current) debugRecognizerRef.current.current = detections;
   }
 
-  return { phase, verdict, evidence, capsule, answerCapsule, confirmTaken, debugShow };
+  return { phase, verdict, evidence, ask, answerAsk, confirmTaken, debugShow };
 }

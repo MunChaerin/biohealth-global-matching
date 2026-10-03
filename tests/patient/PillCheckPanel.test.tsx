@@ -88,22 +88,43 @@ describe("PillCheckPanel 판단 근거", () => {
   });
 });
 
-describe("PillCheckPanel 흰 캡슐 각인 확인", () => {
+describe("PillCheckPanel 모델이 애매할 때 사진으로 확인", () => {
+  const image = "data:image/jpeg;base64,AAAA";
+
   it("각인을 읽는 중이면 그렇게 안내한다", () => {
-    render(panel({ kind: "unsure" }, { capsule: { kind: "reading" } }));
-    expect(screen.getByText("캡슐에 새겨진 글자를 확인하고 있어요…")).toBeInTheDocument();
+    render(panel({ kind: "unsure" }, { ask: { kind: "reading" } }));
+    expect(screen.getByText("약에 새겨진 글자를 확인하고 있어요…")).toBeInTheDocument();
   });
 
-  it("각인으로 못 정하면 사진과 함께 묻고, 답을 넘긴다", () => {
-    const onCapsuleAnswer = vi.fn();
+  it("남은 약이 하나면 그 약이 맞는지 묻고, [맞아요]면 그 약을 넘긴다", () => {
+    const onAnswer = vi.fn();
     const speak = vi.fn();
-    render(panel({ kind: "unsure" }, { speak, onCapsuleAnswer, capsule: { kind: "ask", drugCode: lyribea.drugCode, image: "data:image/jpeg;base64,AAAA", confidence: 0.7 } }));
-    expect(speak).toHaveBeenLastCalledWith("캡슐에 DWB PGN 50 글자가 보이나요? 사진을 보고 알려 주세요.");
-    expect(screen.getByAltText("카메라로 본 캡슐")).toHaveAttribute("src", "data:image/jpeg;base64,AAAA");
+    render(panel({ kind: "unsure" }, { speak, onAnswer, takenIds: [tylenol.id], ask: { kind: "ask", candidates: [lyribea.drugCode], image, confidence: 0.5 } }));
+    expect(speak).toHaveBeenLastCalledWith("이 약이 리리베아캡슐 50mg인가요? DWB PGN 50 글자가 보이는지 사진을 보고 알려 주세요.");
+    expect(screen.getByAltText("카메라로 본 약")).toHaveAttribute("src", image);
     fireEvent.click(screen.getByRole("button", { name: "아니에요" }));
-    expect(onCapsuleAnswer).toHaveBeenLastCalledWith(false);
+    expect(onAnswer).toHaveBeenLastCalledWith(null);
     fireEvent.click(screen.getByRole("button", { name: "맞아요" }));
-    expect(onCapsuleAnswer).toHaveBeenLastCalledWith(true);
+    expect(onAnswer).toHaveBeenLastCalledWith(lyribea.drugCode);
+  });
+
+  it("남은 약이 둘이면 각인과 함께 골라 달라고 한다 (모델이 높게 본 약이 앞)", () => {
+    const onAnswer = vi.fn();
+    render(panel({ kind: "unsure" }, { onAnswer, ask: { kind: "ask", candidates: [tylenol.drugCode, lyribea.drugCode], image, confidence: 0.45 } }));
+    expect(screen.getByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+    const buttons = screen.getAllByRole("button").map((button) => button.textContent);
+    expect(buttons.indexOf("타이레놀정 500mg각인 TYLENOL / 500")).toBeLessThan(buttons.indexOf("리리베아캡슐 50mg각인 DWB PGN 50"));
+    fireEvent.click(screen.getByRole("button", { name: /타이레놀정 500mg/ }));
+    expect(onAnswer).toHaveBeenLastCalledWith(tylenol.drugCode);
+    fireEvent.click(screen.getByRole("button", { name: "둘 다 아니에요" }));
+    expect(onAnswer).toHaveBeenLastCalledWith(null);
+  });
+
+  it("사진을 보고 고른 약의 [먹었어요]는 confirmed로 기록한다", () => {
+    const onTaken = vi.fn(async () => true);
+    render(panel({ kind: "match", drugCode: lyribea.drugCode, byPerson: true }, { onTaken }));
+    fireEvent.click(screen.getByRole("button", { name: "먹었어요" }));
+    expect(onTaken).toHaveBeenCalledWith(lyribea, "confirmed");
   });
 });
 
