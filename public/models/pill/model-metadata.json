@@ -1,5 +1,5 @@
 {
-  "modelVersion": "pill-yolo11n-10cls-v2",
+  "modelVersion": "pill-yolo11n-10cls-v3",
   "task": "detection",
   "architecture": "YOLO11n (Ultralytics), 알약 위치 + 10종 분류",
   "file": "pill_classifier.onnx",
@@ -46,22 +46,41 @@
     "mismatchConfidence": 0.9,
     "mismatchStableMs": 3000,
     "classConfidence": {
-      "K-045037": 0.8
+      "K-045037": 0.75
     }
   },
   "trainedAt": "2026-10-03",
   "exportedAt": "2026-10-03",
   "dataset": "AI Hub 경구약제 이미지 데이터(576) 중 10종 (TS_3, VS_10) + 배경 합성. 돌린 각도 기준 학습/검증/시험 분리. v2: COCO val2017 일상 사진을 잘라 '알약 없음'(빈 라벨)으로 학습 2,000 / 검증 200장 추가, 배경 시험 500장",
   "testMetrics": {
-    "mAP50": 0.995,
-    "mAP50_95": 0.9151,
-    "overall_correct": 0.9839,
+    "mAP50": 0.9949,
+    "mAP50_95": 0.9237,
+    "overall_correct": 0.9776,
     "overall_wrong_pill": 0.0,
     "background": {
       "images": 500,
-      "anyBox": 0.012,
-      "pillLevel": 0.006,
+      "anyBox": 0.018,
+      "pillLevel": 0.008,
       "mismatchLevel": 0.0
+    },
+    "ownTest": {
+      "verdict": {
+        "리리베아캡슐 50mg": {
+          "images": 10,
+          "correct": 0.7,
+          "unsure": 0.2
+        },
+        "타이레놀정 500mg": {
+          "images": 10,
+          "correct": 0.9,
+          "unsure": 0.1
+        }
+      },
+      "confusions": {
+        "리리베아캡슐 50mg -> 타이레놀정 500mg": 1
+      },
+      "overall_correct": 0.8,
+      "overall_wrong_pill": 0.05
     }
   }
 }

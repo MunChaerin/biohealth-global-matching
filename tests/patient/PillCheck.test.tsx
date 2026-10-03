@@ -150,7 +150,7 @@ describe("알약 확인 모드", () => {
     expect(screen.queryByText(/무스판정/)).not.toBeInTheDocument(); // 일정 밖의 약 이름은 말하지 않음
   });
 
-  describe("흰 캡슐 (모델이 리리베아로 보지만 기준 0.8에 못 미침)", () => {
+  describe("흰 캡슐 (모델이 리리베아로 보지만 기준 0.75에 못 미침)", () => {
     async function showWhiteCapsule() {
       window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
       mockCamera();

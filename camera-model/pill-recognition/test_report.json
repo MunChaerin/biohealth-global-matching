@@ -1,11 +1,11 @@
 {
- "mAP50": 0.995,
- "mAP50_95": 0.9151,
+ "mAP50": 0.9949,
+ "mAP50_95": 0.9237,
  "verdict": {
   "리리베아캡슐 50mg": {
    "images": 36,
-   "correct": 0.833,
-   "unsure": 0.167
+   "correct": 0.75,
+   "unsure": 0.25
   },
   "타이레놀정 500mg": {
    "images": 144,
@@ -49,17 +49,36 @@
   },
   "독립목클린캡슐 200mg": {
    "images": 36,
-   "correct": 0.667,
-   "unsure": 0.333
+   "correct": 0.556,
+   "unsure": 0.444
   }
  },
  "confusions": {},
- "overall_correct": 0.9839,
+ "overall_correct": 0.9776,
  "overall_wrong_pill": 0.0,
  "background": {
   "images": 500,
-  "anyBox": 0.012,
-  "pillLevel": 0.006,
+  "anyBox": 0.018,
+  "pillLevel": 0.008,
   "mismatchLevel": 0.0
+ },
+ "ownTest": {
+  "verdict": {
+   "리리베아캡슐 50mg": {
+    "images": 10,
+    "correct": 0.7,
+    "unsure": 0.2
+   },
+   "타이레놀정 500mg": {
+    "images": 10,
+    "correct": 0.9,
+    "unsure": 0.1
+   }
+  },
+  "confusions": {
+   "리리베아캡슐 50mg -> 타이레놀정 500mg": 1
+  },
+  "overall_correct": 0.8,
+  "overall_wrong_pill": 0.05
  }
 }
