@@ -37,7 +37,11 @@ function cropEvidence(frame: HTMLVideoElement | HTMLCanvasElement, box: readonly
 
 export type PillCheckPhase = "loading" | "notReady" | "error" | "running";
 
-const ASK_AFTER_MS = 2_000; // 네모 안에 알약이 한 알 보이는데 이만큼 판정이 안 나면 사진을 보여 주고 묻는다
+// 네모 안에 알약이 한 알 보이는데 판정이 진행되지 않는 상태(checking도 아님)가 이만큼, 이 프레임 수 이상 이어지면 묻는다.
+// 아이패드처럼 한 번 판정에 시간이 걸리는 기기에서 판정보다 질문이 먼저 뜨지 않게 프레임 수도 본다.
+const ASK_AFTER_MS = 2_000;
+const ASK_MIN_FRAMES = 3;
+const ASK_IDLE = { since: null, frames: 0, otherSince: null, state: "idle" } as const;
 
 /**
  * 모델이 애매할 때의 확인 상태.
@@ -94,7 +98,9 @@ export function usePillCheck(options: {
   // 유지 중인 판정: 맞는 약(먹었어요를 누르거나 다른 약이 보일 때까지) 또는 각인으로 정한 다른 약(약을 내려놓을 때까지)
   const heldRef = useRef<HeldVerdict | null>(null);
   // 애매한 상태: 한 알이 보이기 시작한 시각, 이번에 각인 읽기·묻기를 했는지 (약을 내려놓으면 다시 할 수 있음)
-  const askRef = useRef<{ since: number | null; state: "idle" | "busy" | "done" }>({ since: null, state: "idle" });
+  const askRef = useRef<{ since: number | null; frames: number; otherSince: number | null; state: "idle" | "busy" | "done" }>({ ...ASK_IDLE });
+  // 지금 보여 주는 근거 사진의 약 (같은 약이면 다시 찍지 않음, 사람이 확인한 경우 질문 때 사진을 유지)
+  const evidenceCodeRef = useRef<string | null>(null);
   const [ask, setAsk] = useState<PillAsk | null>(null);
   const takenKey = takenCodes.join(",");
   const expectedKey = medications.map((item) => item.drugCode).join(",");
@@ -112,13 +118,12 @@ export function usePillCheck(options: {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let reported: string | null = null; // 이번에 보낸 결과 (상태:약 코드) - 같은 결과는 다시 안 보냄
     let unsureSince: number | null = null;
-    let evidenceCode: string | null = null;
     let loggedAt = 0;
     const tracker = new PillVerdictTracker(medicationsRef.current.map((item) => item.drugCode));
     trackerRef.current = tracker;
     heldRef.current = null;
     tracker.setTaken(takenRef.current);
-    askRef.current = { since: null, state: "idle" };
+    askRef.current = { ...ASK_IDLE };
     setPhase("loading");
     setVerdict({ kind: "noPill" });
     setEvidence(null);
@@ -173,17 +178,24 @@ export function usePillCheck(options: {
         const pending = askRef.current;
         const now = performance.now();
         const held = heldRef.current;
-        // 맞는 약으로 유지 중인데 다른 약이 확실히(0.6 이상) 1초 넘게 보이면 유지를 푼다 (다른 약을 들고 [먹었어요]를 누르지 않게)
-        if (held?.kind === "match" && single && single.drugCode !== held.drugCode && single.confidence >= CONFIDENT) {
-          pending.since ??= now;
-          if (now - pending.since >= STABLE_MS) heldRef.current = null;
+        // 모델이 맞는 약으로 판정해 유지 중인데 다른 약이 확실히(0.6 이상) 1초 넘게 보이면 유지를 푼다 (다른 약을 들고 [먹었어요]를 누르지 않게).
+        // 사람이 사진을 보고 정한 경우는 풀지 않는다 (모델이 그 알약을 계속 다른 약으로 보는 경우라서)
+        if (held?.kind === "match" && !held.byPerson && single && single.drugCode !== held.drugCode && single.confidence >= CONFIDENT) {
+          pending.otherSince ??= now;
+          if (now - pending.otherSince >= STABLE_MS) heldRef.current = null;
+        } else {
+          pending.otherSince = null;
         }
         if (reading.kind === "match" || reading.kind === "mismatch") setAsk(null); // 모델이 정했으면 묻지 않는다
-        // 방금 먹은 약을 다시 비춘 경우는 묻지 않는다 ("방금 드셨어요" 판정을 기다림)
-        if (single && !takenRef.current.includes(single.drugCode) && reading.kind !== "match" && reading.kind !== "mismatch" && heldRef.current === null) {
+        // 판정이 진행되지 않는 한 알: 판정기가 맞는 약 쪽으로 진행 중(checking)이면 기다리고,
+        // 방금 먹은 약을 다시 비춘 경우도 묻지 않는다 ("방금 드셨어요" 판정을 기다림)
+        const stalled =
+          single && !takenRef.current.includes(single.drugCode) && reading.kind !== "match" && reading.kind !== "mismatch" && reading.kind !== "checking" && heldRef.current === null;
+        if (stalled) {
           pending.since ??= now;
+          pending.frames += 1;
           const white = WHITE_CAPSULES.includes(single.drugCode);
-          if (pending.state === "idle" && now - pending.since >= (white ? STABLE_MS : ASK_AFTER_MS)) {
+          if (pending.state === "idle" && pending.frames >= ASK_MIN_FRAMES && now - pending.since >= (white ? STABLE_MS : ASK_AFTER_MS)) {
             pending.state = "busy";
             const image = cropEvidence(frame, single.box!);
             if (white) {
@@ -207,19 +219,20 @@ export function usePillCheck(options: {
               askPerson(single, image);
             }
           }
-        } else if (!(held?.kind === "match" && single && single.drugCode !== held.drugCode)) {
+        } else {
           pending.since = null;
+          pending.frames = 0;
           if (reading.kind === "noPill" && pending.state === "done") pending.state = "idle"; // 내려놓았다가 다시 비추면 다시 함
         }
 
         const next = heldRef.current ?? reading;
         setVerdict(next);
-        if ((next.kind === "match" || next.kind === "mismatch") && next.box && evidenceCode !== next.drugCode) {
-          evidenceCode = next.drugCode;
+        if ((next.kind === "match" || next.kind === "mismatch") && next.box && evidenceCodeRef.current !== next.drugCode) {
+          evidenceCodeRef.current = next.drugCode;
           const image = cropEvidence(frame, next.box);
           if (image) setEvidence({ drugCode: next.drugCode, image });
         } else if (next.kind === "noPill") {
-          evidenceCode = null;
+          evidenceCodeRef.current = null;
         }
         // 인식 결과를 서버로 (판정 결과만, 사진·영상 없음)
         const remaining = medicationsRef.current;
@@ -297,7 +310,7 @@ export function usePillCheck(options: {
   useEffect(() => {
     trackerRef.current?.setExpected(expectedKey ? expectedKey.split(",") : []);
     heldRef.current = null;
-    askRef.current = { since: null, state: "idle" };
+    askRef.current = { ...ASK_IDLE };
     setEvidence(null);
     setAsk(null);
   }, [expectedKey]);
@@ -318,6 +331,9 @@ export function usePillCheck(options: {
     if (!drugCode || !asked) return;
     const held: HeldVerdict = { kind: "match", drugCode, confidence: asked.confidence, box: asked.box, byPerson: true };
     heldRef.current = held;
+    // 근거 사진은 환자가 보고 고른 질문 때 사진 그대로 (버튼을 누른 뒤 화면으로 덮어쓰지 않음)
+    evidenceCodeRef.current = drugCode;
+    setEvidence(asked.image ? { drugCode, image: asked.image } : null);
     setVerdict(held);
   }
 

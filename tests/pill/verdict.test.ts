@@ -61,22 +61,32 @@ describe("PillVerdictTracker", () => {
     for (let t = 0; t <= 5_000; t += 250) expect(tracker.update(t, [metformin(0.75)]).kind).toBe("unsure");
   });
 
-  it("중간에 약이 바뀌거나 사라지면 처음부터 다시 센다", () => {
-    const tracker = new PillVerdictTracker("A");
+  it("판정 중인 약이 바뀌면 처음부터 다시 센다", () => {
+    const tracker = new PillVerdictTracker(["A", "B"]);
     tracker.update(0, [metformin()]);
     tracker.update(600, [amlodipine()]); // 바뀜
     expect(tracker.update(1_200, [amlodipine()]).kind).toBe("checking"); // 600부터 600ms
-    tracker.update(1_300, []); // 사라짐
-    tracker.update(1_400, [amlodipine()]);
-    expect(tracker.update(2_300, [amlodipine()]).kind).toBe("checking");
-    expect(tracker.update(2_400, [amlodipine()]).kind).toBe("match");
+    expect(tracker.update(1_600, [amlodipine()]).kind).toBe("match");
   });
 
-  it("확신이 낮은 프레임은 판정을 이어가지 않는다", () => {
+  it("한 프레임만 흔들리면(기준 아래·잠깐 안 보임) 이어서 센다 - 1초에 1~2프레임인 기기 대비", () => {
     const tracker = new PillVerdictTracker("A");
     tracker.update(0, [amlodipine()]);
-    expect(tracker.update(500, [amlodipine(0.5)]).kind).toBe("unsure");
-    expect(tracker.update(1_000, [amlodipine()]).kind).toBe("checking");
+    expect(tracker.update(500, [amlodipine(0.5)])).toEqual({ kind: "checking", drugCode: "A" });
+    expect(tracker.update(1_000, [amlodipine()]).kind).toBe("match"); // 0부터 1초
+    tracker.reset();
+    tracker.update(2_000, [amlodipine()]);
+    expect(tracker.update(2_500, []).kind).toBe("checking"); // 잠깐 안 보임
+    expect(tracker.update(3_000, [amlodipine()]).kind).toBe("match");
+  });
+
+  it("두 프레임 연속으로 흔들리면 처음부터 다시 센다", () => {
+    const tracker = new PillVerdictTracker("A");
+    tracker.update(0, [amlodipine()]);
+    tracker.update(400, [amlodipine(0.5)]);
+    expect(tracker.update(800, [amlodipine(0.5)]).kind).toBe("unsure");
+    expect(tracker.update(1_200, [amlodipine()]).kind).toBe("checking"); // 1200부터 다시
+    expect(tracker.update(2_200, [amlodipine()]).kind).toBe("match");
   });
 
   it("같은 시간에 먹을 약이 여러 개면 그중 하나면 맞음, 남은 약이 바뀌면 다시 센다", () => {

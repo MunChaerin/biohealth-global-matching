@@ -191,6 +191,27 @@ describe("알약 확인 모드", () => {
     });
   });
 
+  it("사진을 보고 고른 뒤 근거 사진은 질문 때 사진 그대로 (버튼 누른 뒤 화면으로 덮어쓰지 않음)", async () => {
+    let shot = 0;
+    vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockImplementation(() => `data:image/jpeg;base64,SHOT${(shot += 1)}`);
+    // jsdom에는 캔버스 그리기가 없으므로 근거 사진용(옵션 없는 getContext)만 흉내 낸다
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(((_type: string, options?: unknown) =>
+      options ? null : { drawImage: vi.fn() }) as unknown as typeof HTMLCanvasElement.prototype.getContext);
+    window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
+    mockCamera();
+    renderPillCheck();
+    await screen.findByRole("button", { name: "다른 약" });
+    await showPill("다른 약");
+    expect(await screen.findByText("어떤 약인가요? 사진을 보고 골라 주세요.")).toBeInTheDocument();
+    const asked = screen.getByAltText("카메라로 본 약").getAttribute("src");
+    fireEvent.click(screen.getByRole("button", { name: /타이레놀정 500mg각인/ }));
+    expect(await screen.findByText(/맞아요! 타이레놀정 500mg이에요/)).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 600));
+    });
+    expect(screen.getByAltText("카메라로 본 약")).toHaveAttribute("src", asked!);
+  });
+
   it("일정 밖의 약은 '다른 약'이라 하지 않고 사진으로 묻고, 의료진 기록은 unknown 한 번만", async () => {
     window.localStorage.setItem(CAMERA_CONSENT_KEY, "on");
     mockCamera();
