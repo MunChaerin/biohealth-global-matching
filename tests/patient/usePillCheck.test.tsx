@@ -10,13 +10,15 @@ vi.mock("../../lib/pill/capsuleOcr", async (importOriginal) => ({
   readCapsuleImprint: vi.fn(async () => ({ drugCode: ocr.drugCode, texts: [] })),
 }));
 
+import type { PillDetection } from "../../lib/pill/verdict";
+
 // 카메라 앞의 장면: 판정을 다시 시작해도(새 인식기) 알약은 계속 보이고 있다
 const scene = vi.hoisted(() => ({ detections: [] as unknown[] }));
 vi.mock("../../lib/pill/recognizer", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/pill/recognizer")>();
   class SceneRecognizer extends actual.DebugPillRecognizer {
     override async detect() {
-      return scene.detections as Awaited<ReturnType<actual.DebugPillRecognizer["detect"]>>;
+      return scene.detections as PillDetection[];
     }
   }
   return { ...actual, DebugPillRecognizer: SceneRecognizer };
