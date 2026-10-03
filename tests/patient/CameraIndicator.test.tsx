@@ -9,7 +9,7 @@ vi.mock("@mediapipe/tasks-vision", () => ({
   FaceLandmarker: { createFromOptions: (...args: unknown[]) => createFromOptions(...(args as [])) },
 }));
 
-import { CAMERA_CONSENT_KEY, CameraIndicator } from "../../components/patient/CameraIndicator";
+import { CAMERA_CONSENT_KEY, CameraIndicator, PILL_CAMERA_CONSENT_KEY } from "../../components/patient/CameraIndicator";
 
 function fakeStream() {
   const track = { stop: vi.fn() };
@@ -43,14 +43,18 @@ describe("CameraIndicator", () => {
   });
 
   describe("동의 전", () => {
-    it("안내와 켜기 버튼만 보여주고 카메라는 켜지 않는다", async () => {
-      const getUserMedia = vi.fn();
+    it("안내와 켜기 버튼을 보여주고, 표정 관찰은 켜지 않은 채 약 확인용 카메라 권한만 받아 둔다", async () => {
+      const { stream, track } = fakeStream();
+      const getUserMedia = vi.fn().mockResolvedValue(stream);
       mockCamera(getUserMedia);
       render(<CameraIndicator />);
       expect(await screen.findByText("표정 관찰 카메라를 켤까요?")).toBeInTheDocument();
       expect(screen.getByText(/영상은 저장하거나 보내지 않아요/)).toBeInTheDocument();
-      expect(getUserMedia).not.toHaveBeenCalled();
-      expect(fetch).not.toHaveBeenCalled();
+      await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1));
+      expect(getUserMedia).toHaveBeenCalledWith({ video: { facingMode: "environment" }, audio: false }); // 권한만
+      await waitFor(() => expect(track.stop).toHaveBeenCalled()); // 받자마자 끔
+      expect(window.localStorage.getItem(PILL_CAMERA_CONSENT_KEY)).toBe("on");
+      expect(fetch).not.toHaveBeenCalled(); // 표정 관찰 보고 없음
     });
 
     it("켜기를 누르면 카메라를 켜고 동의를 기억한다", async () => {
@@ -58,9 +62,10 @@ describe("CameraIndicator", () => {
       const getUserMedia = vi.fn().mockResolvedValue(stream);
       mockCamera(getUserMedia);
       render(<CameraIndicator />);
+      await waitFor(() => expect(getUserMedia).toHaveBeenCalledTimes(1)); // 들어오자마자 약 확인용 권한
       fireEvent.click(await screen.findByRole("button", { name: "카메라 켜기" }));
       expect(await screen.findByText("표정 관찰 카메라 작동 중")).toBeInTheDocument();
-      expect(getUserMedia).toHaveBeenCalledTimes(1);
+      expect(getUserMedia).toHaveBeenCalledTimes(2);
       expect(window.localStorage.getItem(CAMERA_CONSENT_KEY)).toBe("on");
     });
   });

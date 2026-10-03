@@ -22,6 +22,7 @@ export function isDemoPatient(patientId: string): boolean {
 /** 환자 화면이 보고하는 카메라 상태. measuring일 때만 판정 결과가 있다(측정 못 한 값은 만들지 않음). */
 export type CameraStatus =
   | "off" // 환자가 카메라를 끔 (분석·전송 중지)
+  | "paused" // 알약 확인 중이라 표정 관찰을 잠시 멈춤 (판정 값 없음)
   | "starting" // 모델 로딩 / 카메라 켜는 중
   | "calibrating" // 평상시 표정 기준선 수집 중
   | "measuring" // 판정 중
@@ -39,6 +40,7 @@ export interface CameraReport {
 
 const statuses: readonly CameraStatus[] = [
   "off",
+  "paused",
   "starting",
   "calibrating",
   "measuring",

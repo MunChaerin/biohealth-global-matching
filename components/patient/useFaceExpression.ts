@@ -62,10 +62,55 @@ export async function sendReport(report: CameraReport): Promise<void> {
  */
 export type MouthAssistStatus = "waiting" | "ready" | "speaking" | "noFace";
 
-export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PATIENT_ID, onMouthStatus?: (status: MouthAssistStatus) => void) {
+/**
+ * 카메라가 켜져 있을 때 표정 분석을 어떻게 할지.
+ * - on: 표정 분석·전송
+ * - paused: 표정 관찰에 동의했지만 알약 확인 중 -> 분석 멈춤, 의료진 화면에는 "paused" 상태만 전송
+ * - off: 표정 관찰에 동의하지 않고 알약 확인용으로만 카메라를 켬 -> 분석·전송 모두 안 함
+ * 카메라를 껐다 켜지 않도록 effect가 아니라 ref로 읽는다.
+ */
+export type ExpressionAnalysis = "on" | "paused" | "off";
+
+// 카메라 해상도. 표정 분석은 640x480이면 충분하지만, 알약 확인은 각인을 읽어야 해서 가능한 한 높게 받는다
+// (640x480에서는 알약을 얼굴 앞까지 가져와야 글씨가 보였음). 카메라를 새로 켜지 않고 쓰던 카메라의 설정만 바꾼다.
+const EXPRESSION_RESOLUTION = { width: { ideal: 640 }, height: { ideal: 480 } };
+const PILL_RESOLUTION = { width: { ideal: 1920 }, height: { ideal: 1080 } };
+
+/** 카메라 해상도를 바꾸고 실제로 받은 크기를 돌려준다. 기기가 못 맞추면 되는 값으로 내려간다. */
+async function setResolution(stream: MediaStream, pill: boolean): Promise<{ width: number; height: number } | null> {
+  const track = stream.getVideoTracks?.()[0];
+  if (!track) return null;
+  try {
+    await track.applyConstraints?.(pill ? PILL_RESOLUTION : EXPRESSION_RESOLUTION);
+  } catch (error) {
+    console.warn("[카메라] 해상도를 바꾸지 못했습니다.", error);
+  }
+  const { width, height } = track.getSettings?.() ?? {};
+  return width && height ? { width, height } : null;
+}
+
+export function useFaceExpression(
+  enabled: boolean,
+  patientId: string = DEMO_PATIENT_ID,
+  onMouthStatus?: (status: MouthAssistStatus) => void,
+  analysis: ExpressionAnalysis = "on",
+) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [status, setStatus] = useState<CameraStatus>(enabled ? "starting" : "off");
   const [previewFilter, setPreviewFilter] = useState(1);
+  const analysisRef = useRef(analysis);
+  analysisRef.current = analysis;
+  // 알약 확인도 같은 밝기 보정을 쓰도록 바깥에 꺼내 둔다 (카메라가 켜져 있을 때만 값이 있음)
+  const correctedFrameRef = useRef<((video: HTMLVideoElement) => HTMLVideoElement | HTMLCanvasElement) | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  // 전면 카메라 요청이 진행 중이거나 켜져 있는지. iOS는 카메라를 한 번에 하나만 쓰므로, 후면을 열기 전에
+  // 이 값이 false가 될 때까지(늦게 도착하는 전면 요청까지 끝날 때까지) 기다린다.
+  const [captureOpen, setCaptureOpen] = useState(false);
+  const [cameraSize, setCameraSize] = useState<{ width: number; height: number } | null>(null);
+  // analysis가 "on"이 아니면 알약 확인 중 (CameraIndicator 참고)
+  const pillMode = analysis !== "on";
+  const pillModeRef = useRef(pillMode);
+  pillModeRef.current = pillMode;
 
   useEffect(() => {
     if (!enabled) {
@@ -96,6 +141,7 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
       const statusChanged = nextStatus !== currentStatus;
       currentStatus = nextStatus;
       setStatus(nextStatus);
+      if (analysisRef.current === "off") return; // 표정 관찰에 동의하지 않았으면 아무것도 보내지 않는다
       const now = Date.now();
       if (!force && !statusChanged && now - lastReportAt < REPORT_INTERVAL_MS) return;
       lastReportAt = now;
@@ -131,10 +177,16 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
       return canvas;
     }
 
+    correctedFrameRef.current = correctedFrame;
+
     function tick() {
       if (cancelled) return;
       const video = videoRef.current;
-      if (video && landmarker && video.readyState >= 2 && video.videoWidth > 0) {
+      if (analysisRef.current !== "on") {
+        // 알약 확인 중: 카메라는 켜 둔 채 표정 분석만 멈춘다
+        if (analysisRef.current === "paused") report("paused");
+        else setStatus(currentStatus = "paused");
+      } else if (video && landmarker && video.readyState >= 2 && video.videoWidth > 0) {
         const timeMs = performance.now();
         const result = landmarker.detectForVideo(correctedFrame(video), timeMs);
         const landmarks = result.faceLandmarks[0];
@@ -156,21 +208,31 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
       timer = setTimeout(tick, SAMPLE_INTERVAL_MS);
     }
 
+    function stopStream() {
+      stream?.getTracks().forEach((track) => track.stop());
+      setCaptureOpen(false);
+    }
+
     async function start() {
+      setCaptureOpen(true);
+      let opened: MediaStream;
       try {
-        stream = await navigator.mediaDevices.getUserMedia({
+        opened = await navigator.mediaDevices.getUserMedia({
           video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } },
           audio: false,
         });
       } catch (error) {
+        setCaptureOpen(false);
         if (!cancelled) report(cameraErrorStatus(error), true);
         return;
       }
-      // 기다리는 동안 화면이 닫혔으면(또는 개발 모드에서 effect가 두 번 실행되면) 바로 끈다
+      // 기다리는 동안 화면이 닫혔으면(또는 개발 모드에서 effect가 두 번 실행되면, 약 확인으로 후면 카메라를 쓰게 되면) 바로 끈다
       if (cancelled) {
-        stream.getTracks().forEach((track) => track.stop());
+        opened.getTracks().forEach((track) => track.stop());
+        setCaptureOpen(false);
         return;
       }
+      stream = opened;
       try {
         filterMediapipeInfoLogs();
         const { FaceLandmarker, FilesetResolver } = await import("@mediapipe/tasks-vision");
@@ -187,25 +249,33 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
         landmarker = created;
       } catch (error) {
         console.error("face landmarker load error", error);
-        stream.getTracks().forEach((track) => track.stop()); // 분석을 못 하면 카메라도 끈다
+        stopStream(); // 분석을 못 하면 카메라도 끈다
         if (!cancelled) report("unavailable", true);
         return;
       }
 
       const video = videoRef.current;
       if (!video) {
-        stream.getTracks().forEach((track) => track.stop());
+        stopStream();
         return;
       }
       video.srcObject = stream;
       try {
         await video.play();
       } catch (error) {
-        stream.getTracks().forEach((track) => track.stop());
+        stopStream();
         if (!cancelled) report(cameraErrorStatus(error), true);
         return;
       }
-      report("calibrating", true);
+      streamRef.current = stream;
+      if (pillModeRef.current) {
+        // 알약 확인을 하려고 카메라를 켠 경우: 처음부터 높은 해상도로
+        const size = await setResolution(stream, true);
+        if (cancelled) return;
+        setCameraSize(size);
+        if (size) console.info(`[카메라] 알약 확인 해상도 ${size.width}x${size.height}`);
+      }
+      if (analysisRef.current === "on") report("calibrating", true);
       tick();
     }
 
@@ -213,11 +283,30 @@ export function useFaceExpression(enabled: boolean, patientId: string = DEMO_PAT
 
     return () => {
       cancelled = true;
+      correctedFrameRef.current = null;
+      streamRef.current = null;
+      setCameraSize(null);
       if (timer) clearTimeout(timer);
-      stream?.getTracks().forEach((track) => track.stop());
+      // 이미 받은 스트림은 바로 끈다. 아직 요청 중이면 도착했을 때 start()에서 끄고 captureOpen을 내린다
+      if (stream) stopStream();
       landmarker?.close();
     };
   }, [enabled, patientId, onMouthStatus]);
 
-  return { videoRef, status, previewFilter };
+  // 알약 확인을 시작·종료하면 해상도만 바꾼다 (카메라는 그대로)
+  useEffect(() => {
+    const stream = streamRef.current;
+    if (!stream) return;
+    let cancelled = false;
+    void setResolution(stream, pillMode).then((size) => {
+      if (cancelled) return;
+      setCameraSize(size);
+      if (size) console.info(`[카메라] ${pillMode ? "알약 확인" : "표정 관찰"} 해상도 ${size.width}x${size.height}`);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [pillMode]);
+
+  return { videoRef, status, previewFilter, correctedFrame: correctedFrameRef, cameraSize, captureOpen };
 }

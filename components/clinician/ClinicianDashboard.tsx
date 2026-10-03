@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { FacialObservation } from "./FacialObservation";
+import { MedicationStatus } from "./MedicationStatus";
 import { createSoapDraft, getChatSessionId, type SoapDraft } from "../../lib/chatbot/soapDraft";
 import type { ChatbotContext } from "../../lib/chatbot/types";
 import { defaultPersona, getPatientPersona, patientPersonas } from "../../lib/patient/personas";
@@ -221,6 +222,8 @@ export function ClinicianDashboard() {
           </div>
         </article>
       </section>
+
+      <MedicationStatus patientId={selectedPersona.id} />
 
       <section className={styles.soap}>
         <div className={styles.soapHeading}><div><p>MEDICAL REVIEW · LIVE DEMO</p><h2>SOAP 보고서 초안</h2><span>환자 챗봇 대화가 업데이트될 때마다 서버 세션을 통해 갱신되는 검토용 초안입니다.</span></div><button type="button">초안 저장</button></div>
