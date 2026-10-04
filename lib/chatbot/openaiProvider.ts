@@ -225,6 +225,11 @@ function inferSeverityNrs(patientText: string): number | undefined {
   return values.length > 0 ? Math.max(...values) : undefined;
 }
 
+function inferMood(patientText: string): string | undefined {
+  const text = patientText.trim();
+  return /(기분|의욕|気分|意欲|やる気)/.test(text) ? text : undefined;
+}
+
 function reconcileConversationFlow(
   output: ChatbotTurnOutput,
   input: ChatbotTurnInput,
@@ -232,19 +237,18 @@ function reconcileConversationFlow(
   if (output.conversationState === "SAFETY_HOLD" || output.sessionAction === "handoff") return output;
 
   const inferredSeverity = inferSeverityNrs(input.patientText);
+  const inferredMood = inferMood(input.patientText);
   const subjectivePatch = {
     ...output.subjectivePatch,
     ...(inferredSeverity === undefined ? {} : { severityNrs: inferredSeverity }),
+    ...(output.subjectivePatch.mood !== undefined || inferredMood === undefined ? {} : { mood: inferredMood }),
   };
   const collected = { ...input.context.subjective, ...subjectivePatch };
   const missing = collectionFlow.filter(({ field }) => collected[field] === undefined);
   const expectedTarget = missing[0]?.target ?? "summary";
 
-  if (output.sessionAction === "complete" || output.conversationState === "READY_FOR_SOAP") {
+  if (output.sessionAction !== "continue" || output.conversationState === "READY_FOR_SOAP") {
     return { ...output, subjectivePatch };
-  }
-  if (output.nextQuestionTarget === expectedTarget) {
-    return { ...output, subjectivePatch, missingFields: missing.map(({ field }) => field) };
   }
 
   const language = input.context.language ?? "ko";

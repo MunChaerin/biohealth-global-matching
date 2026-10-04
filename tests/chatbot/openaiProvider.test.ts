@@ -68,4 +68,40 @@ describe("OpenAiChatbotProvider conversation flow", () => {
     expect(result.patientReply).toContain("언제부터 시작됐나요?");
     expect(result.missingFields).not.toContain("severityNrs");
   });
+
+  it("stores an explicit mood answer and replaces an unrelated fatigue question with summary confirmation", async () => {
+    const modelOutput = output({
+      patientReply: "조금 피곤하지만 쉬면 괜찮으시군요. 최근의 피로감은 어느 정도인가요?",
+      speechText: "조금 피곤하지만 쉬면 괜찮으시군요. 최근의 피로감은 어느 정도인가요?",
+      subjectivePatch: { fatigue: "조금 지침" },
+      nextQuestionTarget: "summary",
+      missingFields: [],
+    });
+    const client = {
+      responses: { create: async () => ({ output_text: JSON.stringify(modelOutput) }) },
+    };
+    const context: ChatbotContext = {
+      sessionId: "session-2",
+      patientId: "tanaka-haruko",
+      state: "MOOD_CHECK",
+      messages: [],
+      subjective: {
+        chiefConcern: "허리 통증",
+        location: "허리 아래쪽",
+        severityNrs: 7,
+        onset: "어젯밤",
+        functionalImpact: "의자에서 일어나거나 허리를 숙이기 힘듦",
+      },
+      safetyFlags: [],
+      language: "ko",
+    };
+    const patientText = "통증 때문에 조금 지치기는 했지만, 기분이나 의욕에는 큰 변화가 없어요.";
+
+    const result = await new OpenAiChatbotProvider({ client: client as never }).runTurn({ context, patientText });
+
+    expect(result.subjectivePatch.mood).toBe(patientText);
+    expect(result.nextQuestionTarget).toBe("summary");
+    expect(result.patientReply).toContain("지금까지 말씀하신 내용을 정리해드려도 될까요?");
+    expect(result.patientReply).not.toContain("피로감");
+  });
 });
