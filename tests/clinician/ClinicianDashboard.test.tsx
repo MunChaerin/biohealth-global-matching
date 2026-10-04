@@ -20,9 +20,11 @@ const tanakaContext: ChatbotContext = {
 
 describe("ClinicianDashboard", () => {
   beforeEach(() => {
-    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    vi.stubGlobal("confirm", vi.fn(() => true));
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.includes("/api/chat/session")) {
+        if (init?.method === "DELETE") return new Response(JSON.stringify({ ok: true }));
         const context = url.includes("demo-tanaka-haruko") ? tanakaContext : null;
         return new Response(JSON.stringify({ context }));
       }
@@ -44,5 +46,18 @@ describe("ClinicianDashboard", () => {
       expect(screen.getByText("환자 대화 정보가 아직 수집되지 않았습니다.")).toBeInTheDocument();
     });
     expect(screen.queryByText(/주호소: 허리 통증/)).not.toBeInTheDocument();
+  });
+
+  it("선택 환자의 데모 대화와 SOAP 초안을 초기화한다", async () => {
+    render(<ClinicianDashboard />);
+    expect(await screen.findByText(/주호소: 허리 통증/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "대화 초기화" }));
+
+    await waitFor(() => expect(screen.getByText("환자 대화 정보가 아직 수집되지 않았습니다.")).toBeInTheDocument());
+    expect(fetch).toHaveBeenCalledWith("/api/chat/session", expect.objectContaining({
+      method: "DELETE",
+      body: JSON.stringify({ patientId: "tanaka-haruko", sessionId: "demo-tanaka-haruko" }),
+    }));
   });
 });
