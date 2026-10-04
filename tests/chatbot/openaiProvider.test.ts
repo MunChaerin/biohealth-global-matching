@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { preventPatientEcho } from "../../lib/chatbot/openaiProvider.js";
-import type { ChatbotTurnOutput } from "../../lib/chatbot/types.js";
+import { OpenAiChatbotProvider, preventPatientEcho } from "../../lib/chatbot/openaiProvider.js";
+import type { ChatbotContext, ChatbotTurnOutput } from "../../lib/chatbot/types.js";
 
 function output(overrides: Partial<ChatbotTurnOutput> = {}): ChatbotTurnOutput {
   return {
@@ -33,5 +33,39 @@ describe("preventPatientEcho", () => {
 
     expect(result.patientReply).toBe(original.patientReply);
     expect(result.speechText).toBe(result.patientReply);
+  });
+});
+
+describe("OpenAiChatbotProvider conversation flow", () => {
+  it("extracts the highest NRS and advances past an already answered severity question", async () => {
+    const modelOutput = output({
+      patientReply: "이해했습니다. 통증 정도는 어떤가요?",
+      speechText: "이해했습니다. 통증 정도는 어떤가요?",
+      subjectivePatch: {},
+      nextQuestionTarget: "severityNrs",
+      missingFields: ["severityNrs", "onset"],
+    });
+    const client = {
+      responses: { create: async () => ({ output_text: JSON.stringify(modelOutput) }) },
+    };
+    const context: ChatbotContext = {
+      sessionId: "session-1",
+      patientId: "tanaka-haruko",
+      state: "SYMPTOM_DETAIL",
+      messages: [],
+      subjective: { chiefConcern: "허리 통증", location: "허리 아래쪽" },
+      safetyFlags: [],
+      language: "ko",
+    };
+
+    const result = await new OpenAiChatbotProvider({ client: client as never }).runTurn({
+      context,
+      patientText: "가만히 있을 때는 4점 정도인데, 움직일 때는 7점 정도예요.",
+    });
+
+    expect(result.subjectivePatch.severityNrs).toBe(7);
+    expect(result.nextQuestionTarget).toBe("onset");
+    expect(result.patientReply).toContain("언제부터 시작됐나요?");
+    expect(result.missingFields).not.toContain("severityNrs");
   });
 });
