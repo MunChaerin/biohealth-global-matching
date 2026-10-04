@@ -6,6 +6,7 @@ import type {
   ChatbotProvider,
   ChatbotTurnInput,
   ChatbotTurnOutput,
+  QuestionTarget,
   SubjectiveData,
 } from "./types";
 
@@ -120,6 +121,8 @@ const systemInstructions = `
 7. 출력은 반드시 제공된 JSON Schema를 따른다.
 8. patientReply에 환자의 말을 그대로 반복하지 않는다. 이번 답변에서 확인된 내용은 subjectivePatch에 기록하고, patientReply에는 공감 표현 한 문장과 다음 미수집 항목을 묻는 질문 하나만 쓴다.
 9. 예: 환자가 "허리 아파"라고 답하면 chiefConcern에 기록하고 "허리가 불편하시군요. 어느 부위가 가장 아픈가요?"처럼 다음 질문을 한다.
+10. 기존 subjective에 이미 값이 있는 항목은 다시 질문하지 않는다. 이번 subjectivePatch까지 합친 뒤 아직 값이 없는 항목을 질문한다.
+11. 환자가 "가만히 있을 때 4점, 움직일 때 7점"처럼 여러 통증 점수를 말하면 severityNrs에는 더 심한 점수인 7을 기록하고, 움직일 때 심해진다는 내용은 aggravatingFactors에 기록한다.
 `;
 
 const languageInstructions: Record<ChatLanguage, string> = {
@@ -151,6 +154,25 @@ const japaneseQuestionByTarget: Record<string, string> = {
   functionalImpact: "その症状で、日常生活に困っていることはありますか？",
   mood: "最近、気分や意欲に変化はありましたか？",
   summary: "ここまでのお話をまとめてもよろしいですか？",
+};
+
+const collectionFlow: Array<{ target: QuestionTarget; field: keyof SubjectiveData }> = [
+  { target: "chiefConcern", field: "chiefConcern" },
+  { target: "location", field: "location" },
+  { target: "severityNrs", field: "severityNrs" },
+  { target: "onset", field: "onset" },
+  { target: "functionalImpact", field: "functionalImpact" },
+  { target: "mood", field: "mood" },
+];
+
+const stateByQuestion: Partial<Record<QuestionTarget, ChatbotTurnOutput["conversationState"]>> = {
+  chiefConcern: "CHIEF_CONCERN",
+  location: "SYMPTOM_DETAIL",
+  severityNrs: "SYMPTOM_DETAIL",
+  onset: "SYMPTOM_DETAIL",
+  functionalImpact: "FUNCTION_CHECK",
+  mood: "MOOD_CHECK",
+  summary: "SUMMARY_CONFIRMATION",
 };
 
 function normalizedText(value: string): string {
@@ -196,6 +218,51 @@ function removeNullSubjectiveValues(patch: Record<string, unknown>): Partial<Sub
   return Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== null)) as Partial<SubjectiveData>;
 }
 
+function inferSeverityNrs(patientText: string): number | undefined {
+  const values = [...patientText.matchAll(/(?:^|\D)(10|[0-9](?:\.[0-9])?)\s*(?:점|点|\/\s*10)/g)]
+    .map((match) => Number(match[1]))
+    .filter((value) => Number.isFinite(value) && value >= 0 && value <= 10);
+  return values.length > 0 ? Math.max(...values) : undefined;
+}
+
+function reconcileConversationFlow(
+  output: ChatbotTurnOutput,
+  input: ChatbotTurnInput,
+): ChatbotTurnOutput {
+  if (output.conversationState === "SAFETY_HOLD" || output.sessionAction === "handoff") return output;
+
+  const inferredSeverity = inferSeverityNrs(input.patientText);
+  const subjectivePatch = {
+    ...output.subjectivePatch,
+    ...(inferredSeverity === undefined ? {} : { severityNrs: inferredSeverity }),
+  };
+  const collected = { ...input.context.subjective, ...subjectivePatch };
+  const missing = collectionFlow.filter(({ field }) => collected[field] === undefined);
+  const expectedTarget = missing[0]?.target ?? "summary";
+
+  if (output.sessionAction === "complete" || output.conversationState === "READY_FOR_SOAP") {
+    return { ...output, subjectivePatch };
+  }
+  if (output.nextQuestionTarget === expectedTarget) {
+    return { ...output, subjectivePatch, missingFields: missing.map(({ field }) => field) };
+  }
+
+  const language = input.context.language ?? "ko";
+  const question = language === "ja" ? japaneseQuestionByTarget[expectedTarget] : questionByTarget[expectedTarget];
+  const patientReply = language === "ja"
+    ? `お話しいただいた内容を確認しました。${question}`
+    : `말씀해 주신 내용을 확인했습니다. ${question}`;
+  return {
+    ...output,
+    patientReply,
+    speechText: patientReply,
+    conversationState: stateByQuestion[expectedTarget] ?? output.conversationState,
+    subjectivePatch,
+    nextQuestionTarget: expectedTarget,
+    missingFields: missing.map(({ field }) => field),
+  };
+}
+
 export class OpenAiChatbotProvider implements ChatbotProvider {
   private readonly client: OpenAI;
   private readonly model: string;
@@ -233,6 +300,7 @@ export class OpenAiChatbotProvider implements ChatbotProvider {
 
     validateChatbotTurnOutput(parsed);
     parsed.subjectivePatch = removeNullSubjectiveValues(parsed.subjectivePatch as Record<string, unknown>);
-    return preventPatientEcho(parsed, input.patientText, input.context.language ?? "ko");
+    const reconciled = reconcileConversationFlow(parsed, input);
+    return preventPatientEcho(reconciled, input.patientText, input.context.language ?? "ko");
   }
 }
