@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
-import { getChatSession, saveChatSession } from "../../../../lib/chatbot/sessionStore";
+import { deleteChatSession, getChatSession, saveChatSession } from "../../../../lib/chatbot/sessionStore";
 import type { ChatbotContext } from "../../../../lib/chatbot/types";
+import { demoGuard } from "../../../../lib/demoGuard";
+import { getChatSessionId } from "../../../../lib/chatbot/soapDraft";
 
 export const runtime = "nodejs";
 
@@ -22,5 +24,20 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
   } catch {
     return NextResponse.json({ error: "챗봇 세션을 저장하지 못했습니다." }, { status: 400 });
+  }
+}
+
+export async function DELETE(request: Request) {
+  try {
+    const body = (await request.json()) as { patientId?: string; sessionId?: string };
+    const denied = demoGuard(body.patientId);
+    if (denied) return denied;
+    if (!body.sessionId || body.sessionId !== getChatSessionId(body.patientId!)) {
+      return NextResponse.json({ error: "유효한 데모 세션이 필요합니다." }, { status: 400 });
+    }
+    await deleteChatSession(body.sessionId);
+    return NextResponse.json({ ok: true }, { headers: { "Cache-Control": "no-store" } });
+  } catch {
+    return NextResponse.json({ error: "챗봇 세션을 초기화하지 못했습니다." }, { status: 400 });
   }
 }

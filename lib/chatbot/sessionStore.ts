@@ -27,3 +27,13 @@ export async function getChatSession(sessionId: string): Promise<ChatbotContext 
   }
   return sessions.get(sessionId);
 }
+
+export async function deleteChatSession(sessionId: string): Promise<void> {
+  requireProductionStorage();
+  if (isSupabaseConfigured()) {
+    const { error } = await getSupabaseAdmin().from("chat_sessions").delete().eq("session_id", sessionId);
+    assertSupabaseResult(error);
+    return;
+  }
+  sessions.delete(sessionId);
+}
