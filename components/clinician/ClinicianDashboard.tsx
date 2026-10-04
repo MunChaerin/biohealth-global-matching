@@ -55,17 +55,29 @@ export function ClinicianDashboard() {
   const explanationEditedRef = useRef(false);
 
   useEffect(() => {
+    let cancelled = false;
     planEditedRef.current = false;
     explanationSentRef.current = false;
     explanationEditedRef.current = false;
+    setSoap(emptySoap);
+    setPlan(emptySoap.plan);
+    setConversation([]);
+    setObservation(createConversationObservation({
+      messages: [],
+      safetyFlags: [],
+      subjective: {},
+      state: "CHIEF_CONCERN",
+      sessionId: getChatSessionId(selectedPersona.id),
+      patientId: selectedPersona.id,
+    }));
     setExplanationSent(false);
     setExplanation(createEasyExplanation(selectedPersona, emptySoap));
     const update = async () => {
       try {
         const response = await fetch(`/api/chat/session?sessionId=${getChatSessionId(selectedPersona.id)}`, { cache: "no-store" });
-        if (!response.ok) return;
+        if (!response.ok || cancelled) return;
         const payload = (await response.json()) as { context?: ChatbotContext | null };
-        if (!payload.context) return;
+        if (!payload.context || payload.context.patientId !== selectedPersona.id || cancelled) return;
         const next = createSoapDraft(payload.context);
         setSoap(next);
         setObservation(createConversationObservation(payload.context));
@@ -73,12 +85,13 @@ export function ClinicianDashboard() {
         if (!planEditedRef.current) setPlan(next.plan);
         if (!explanationSentRef.current && !explanationEditedRef.current) setExplanation(createEasyExplanation(selectedPersona, next));
       } catch {
-        // 의료진 화면은 마지막 정상 초안을 유지한다.
+        // 선택한 환자의 빈 상태를 유지하고 다음 polling에서 다시 시도한다.
       }
     };
     update();
     const interval = window.setInterval(update, 1000);
     return () => {
+      cancelled = true;
       window.clearInterval(interval);
     };
   }, [selectedPersona.id]);
