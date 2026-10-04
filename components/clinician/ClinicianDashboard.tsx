@@ -164,6 +164,22 @@ export function ClinicianDashboard() {
     if (response.ok) { setExplanation(text); explanationSentRef.current = true; setExplanationSent(true); }
   }
 
+  async function resetChatSession() {
+    if (!window.confirm(`${selectedPersona.name} 환자의 데모 대화와 SOAP 초안을 초기화할까요?`)) return;
+    const response = await fetch("/api/chat/session", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ patientId: selectedPersona.id, sessionId: getChatSessionId(selectedPersona.id) }),
+    });
+    if (!response.ok) return;
+    setSoap(emptySoap);
+    setPlan(emptySoap.plan);
+    setConversation([]);
+    setObservation(createConversationObservation({ messages: [], safetyFlags: [], subjective: {}, state: "CHIEF_CONCERN", sessionId: getChatSessionId(selectedPersona.id), patientId: selectedPersona.id }));
+    setExplanation(createEasyExplanation(selectedPersona, emptySoap));
+    setExplanationSent(false);
+  }
+
   function acknowledgeAlert(id: string) {
     setAcknowledgedAlerts((current) => current.includes(id) ? current : [...current, id]);
   }
@@ -239,7 +255,7 @@ export function ClinicianDashboard() {
       <MedicationStatus patientId={selectedPersona.id} />
 
       <section className={styles.soap}>
-        <div className={styles.soapHeading}><div><p>MEDICAL REVIEW · LIVE DEMO</p><h2>SOAP 보고서 초안</h2><span>환자 챗봇 대화가 업데이트될 때마다 서버 세션을 통해 갱신되는 검토용 초안입니다.</span></div><button type="button">초안 저장</button></div>
+        <div className={styles.soapHeading}><div><p>MEDICAL REVIEW · LIVE DEMO</p><h2>SOAP 보고서 초안</h2><span>환자 챗봇 대화가 업데이트될 때마다 서버 세션을 통해 갱신되는 검토용 초안입니다.</span></div><button type="button" onClick={() => void resetChatSession()}>대화 초기화</button></div>
         <div className={styles.soapGrid}>
           <article className={styles.soapS}><b>S</b><div><h3>Subjective <small>대화 기반</small></h3><p>{soap.subjective}</p><span>{soap.subjectiveMeta}</span></div></article>
           <article className={styles.soapO}><b>O</b><div><h3>Objective <small>연동 대기</small></h3><p>{soap.objective}</p><span>{soap.objectiveMeta}</span></div></article>
